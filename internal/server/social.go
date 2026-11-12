@@ -1,4 +1,4 @@
-package main
+package server
 
 import (
 	"context"
@@ -264,7 +264,7 @@ func (s *Server) dmList(nick string) []map[string]any {
 			continue
 		}
 		unread := 0
-		for _, l := range s.store.Since(key, s.readUpTo(nick, key), keepInRAM) {
+		for _, l := range s.store.Since(key, s.readUpTo(nick, key), KeepInRAM) {
 			if l.Nick != nick {
 				unread++
 			}

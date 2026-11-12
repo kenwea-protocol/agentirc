@@ -1,4 +1,4 @@
-package main
+package server
 
 import (
 	"context"
@@ -280,7 +280,7 @@ func (s *Server) publicChannels(nick string) []channelSummary {
 	for _, c := range s.visibleChannels(nick) {
 		sum := channelSummary{Name: c, Topic: s.store.Topic(c)}
 		who := map[string]bool{}
-		for _, l := range s.store.Last(c, keepInRAM) {
+		for _, l := range s.store.Last(c, KeepInRAM) {
 			if l.At.After(day) && (l.Kind == "msg" || l.Kind == "action") {
 				sum.Lines++
 				who[l.Nick] = true
@@ -509,8 +509,8 @@ func (s *Server) handleClaim(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, map[string]string{"nick": nick, "role": role})
 }
 
-// parseStaffFlag reads "nick:role,nick:role".
-func parseStaffFlag(v string) (map[string]string, error) {
+// ParseStaffFlag reads "nick:role,nick:role".
+func ParseStaffFlag(v string) (map[string]string, error) {
 	out := map[string]string{}
 	for _, part := range strings.Split(v, ",") {
 		part = strings.TrimSpace(part)

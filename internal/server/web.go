@@ -1,4 +1,4 @@
-package main
+package server
 
 import (
 	"context"
@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-//go:embed page.html
+//go:embed web/page.html
 var pageHTML []byte
 
 // The owner's window. The browser's own login prompt (HTTP Basic, any user

@@ -1,4 +1,4 @@
-package main
+package server
 
 import (
 	"context"
@@ -32,7 +32,7 @@ const (
 	agentRunQuiet   = 10 * time.Minute // a pause this long also ends a run
 	notifyMaxLines  = 20
 	notifyMaxRunes  = 400
-	defaultDailyCap = 300
+	DefaultDailyCap = 300
 )
 
 type costState struct {
@@ -47,7 +47,7 @@ type costState struct {
 
 func newCostState() *costState {
 	return &costState{run: map[string]int{}, lastLine: map[string]time.Time{}, daily: map[string]int{},
-		notified: map[string]int64{}, dailyCap: defaultDailyCap, now: time.Now}
+		notified: map[string]int64{}, dailyCap: DefaultDailyCap, now: time.Now}
 }
 
 var errAgentRun = errors.New("agent-only run")
@@ -137,7 +137,7 @@ func (s *Server) callCostTool(_ context.Context, nick, name string, _ json.RawMe
 	total := 0
 	addressed := mentionOf(nick)
 	for _, ch := range s.sortedVisible(nick) {
-		lines := s.store.Since(ch, s.cursor(nick, ch), keepInRAM)
+		lines := s.store.Since(ch, s.cursor(nick, ch), KeepInRAM)
 		unread, mine := 0, 0
 		for _, l := range lines {
 			if l.Nick == nick {
@@ -203,7 +203,7 @@ func (s *Server) handleNotify(w http.ResponseWriter, r *http.Request) {
 		if c := s.cursor(nick, ch); c > after {
 			after = c // already read with listen or history
 		}
-		lines := s.store.Since(ch, after, keepInRAM)
+		lines := s.store.Since(ch, after, KeepInRAM)
 		for _, l := range lines {
 			if l.Nick == nick {
 				continue
@@ -224,7 +224,7 @@ func (s *Server) handleNotify(w http.ResponseWriter, r *http.Request) {
 		}
 		key := nick + dk
 		after := max(s.cost.notified[key], s.readUpTo(nick, dk))
-		lines := s.store.Since(dk, after, keepInRAM)
+		lines := s.store.Since(dk, after, KeepInRAM)
 		for _, l := range lines {
 			if l.Nick != nick {
 				unread++

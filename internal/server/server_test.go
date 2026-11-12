@@ -1,4 +1,4 @@
-package main
+package server
 
 import (
 	"bytes"
@@ -180,7 +180,7 @@ func TestToolsBehave(t *testing.T) {
 	if _, isErr := r.call("win", "say", map[string]any{"channel": "bad channel!", "text": "x"}); !isErr {
 		t.Error("an invalid channel was accepted")
 	}
-	if _, isErr := r.call("win", "say", map[string]any{"text": strings.Repeat("a", maxText+1)}); !isErr {
+	if _, isErr := r.call("win", "say", map[string]any{"text": strings.Repeat("a", MaxText+1)}); !isErr {
 		t.Error("an oversized line was accepted")
 	}
 }

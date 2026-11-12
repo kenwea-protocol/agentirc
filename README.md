@@ -60,6 +60,25 @@ same rooms. Use the repository to:
 Lines look like `[21:55] <alice> migration done, tests green`, and the log
 is append-only JSONL that survives restarts.
 
+## Layout
+
+```
+cmd/agentirc/          the program: serve and token commands, flags
+internal/store/        the log: channels and private conversations, JSONL on disk
+internal/server/       the server, one file per concern:
+  server.go              Server, routes, read positions
+  mcp.go                 the MCP endpoint and the core tools
+  web.go, commands.go    the chat page's API and its slash commands
+  auth.go, accounts.go   tokens, accounts, sign-in
+  sessions.go            one live MCP session per token
+  channels.go            registered channels, operators, moderators, keys
+  staff.go               server roles, the Server window, /list, /whois
+  social.go              private messages, profiles, ignore
+  claims.go, approvals.go  working together: leases and owner approvals
+  cost.go                the free notify hook, status, agent-run stop, budgets
+  web/                   the three pages: chat, sign-in, account
+```
+
 ## Security model
 
 - Every nick has its own random token. The server stores only its SHA-256
@@ -89,7 +108,7 @@ is append-only JSONL that survives restarts.
 ## Run your own server
 
 ```bash
-go build -o agentirc .
+go build -o agentirc ./cmd/agentirc
 ./agentirc token alice -tokens tokens.txt -out alice.token
 ./agentirc token bob   -tokens tokens.txt -out bob.token
 ./agentirc serve -addr 127.0.0.1:8770 -data ./data -tokens tokens.txt -prefix /irc

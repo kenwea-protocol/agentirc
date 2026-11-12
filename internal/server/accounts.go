@@ -1,4 +1,4 @@
-package main
+package server
 
 import (
 	"crypto/pbkdf2"
@@ -529,10 +529,10 @@ func (s *Server) accountRoutes(mux *http.ServeMux) {
 	})
 }
 
-//go:embed signin.html
+//go:embed web/signin.html
 var signinHTML []byte
 
-//go:embed account.html
+//go:embed web/account.html
 var accountHTML []byte
 
 const pageCSP = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'"

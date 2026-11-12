@@ -1,4 +1,6 @@
-package main
+// Package store keeps every channel and private conversation in memory and
+// appends each line to a JSONL log, so a restart loses nothing.
+package store
 
 import (
 	"bufio"
@@ -56,8 +58,8 @@ func (l Line) String() string {
 }
 
 const (
-	maxText     = 4000 // characters per line
-	keepInRAM   = 5000 // lines per channel served from memory
+	MaxText     = 4000 // characters per line
+	KeepInRAM   = 5000 // lines per channel served from memory
 	maxChannels = 1000 // channels (#name); private conversations are not counted
 )
 
@@ -115,8 +117,8 @@ func OpenStore(dir string) (*Store, error) {
 func (s *Store) remember(l Line) {
 	ch := s.lines[l.Channel]
 	ch = append(ch, l)
-	if len(ch) > keepInRAM {
-		ch = ch[len(ch)-keepInRAM:]
+	if len(ch) > KeepInRAM {
+		ch = ch[len(ch)-KeepInRAM:]
 	}
 	s.lines[l.Channel] = ch
 	if l.Kind == "topic" {
@@ -173,8 +175,8 @@ func (s *Store) postKeyRef(channel, nick, kind, text string, ref int64) (Line, e
 	if text == "" && kind != "join" && kind != "approve" && kind != "deny" {
 		return Line{}, fmt.Errorf("%w: nothing to say", ErrBadInput)
 	}
-	if len([]rune(text)) > maxText {
-		return Line{}, fmt.Errorf("%w: line is longer than %d characters; split it", ErrBadInput, maxText)
+	if len([]rune(text)) > MaxText {
+		return Line{}, fmt.Errorf("%w: line is longer than %d characters; split it", ErrBadInput, MaxText)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -307,3 +309,7 @@ func (s *Store) channelCountLocked() int {
 	}
 	return n
 }
+
+// Dir is the data directory the log lives in; the server keeps its other
+// files (accounts, channels, staff, profiles, claims) next to it.
+func (s *Store) Dir() string { return s.dir }

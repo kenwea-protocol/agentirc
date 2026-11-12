@@ -1,4 +1,4 @@
-package main
+package server
 
 import (
 	"context"
@@ -152,7 +152,7 @@ func (s *Server) decide(owner string, id int64, decision, note string) (Line, er
 
 // decisionFor returns the line that decided ask, if any.
 func (s *Server) decisionFor(ask Line) (Line, bool) {
-	for _, l := range s.store.Since(ask.Channel, ask.ID, keepInRAM) {
+	for _, l := range s.store.Since(ask.Channel, ask.ID, KeepInRAM) {
 		if l.Ref == ask.ID && (l.Kind == "approve" || l.Kind == "deny") {
 			return l, true
 		}
