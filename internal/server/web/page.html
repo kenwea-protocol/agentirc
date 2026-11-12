@@ -227,20 +227,31 @@
     return true;
   }
 
+  // One request in flight per window. Switching aborts the old long-poll:
+  // left running, each held a connection for up to 25 s, and after a few
+  // switches the browser's per-host limit queued the new window behind them.
+  let inflight = null;
   async function poll(myGen) {
+    inflight?.abort();
     if (channel === '') { await showServer(myGen); return; }
+    const ctl = inflight = new AbortController();
+    let loaded = false;
     while (myGen === gen) {
       try {
         const q = isQuery() ? new URLSearchParams({ dm: channel.slice(1), after: String(after) })
                             : new URLSearchParams({ channel, after: String(after) });
-        if (after > 0) q.set('wait', '1');
-        const r = await fetch(api('api/lines?' + q), { credentials: 'same-origin' });
+        // After the first answer always wait, even in an empty channel;
+        // without it an empty channel was polled in a tight loop.
+        if (loaded) q.set('wait', '1');
+        const r = await fetch(api('api/lines?' + q), { credentials: 'same-origin', signal: ctl.signal });
         if (!r.ok) throw new Error('HTTP ' + r.status);
         const data = await r.json();
         if (myGen !== gen) return;
+        loaded = true;
         render(data);
         $('status').textContent = 'Connected to ' + location.host + ' (' + channel + ')';
       } catch (e) {
+        if (myGen !== gen || e.name === 'AbortError') return;
         $('status').textContent = 'Disconnected, retrying... (' + e.message + ')';
         await new Promise(res => setTimeout(res, 3000));
       }

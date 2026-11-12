@@ -102,12 +102,13 @@ func (s *Server) handleLines(w http.ResponseWriter, r *http.Request) {
 	}
 	after, _ := strconv.ParseInt(r.URL.Query().Get("after"), 10, 64)
 	var lines []Line
-	if after == 0 {
-		lines = s.store.Last(channel, 300)
-	} else if r.URL.Query().Get("wait") == "1" {
+	// wait=1 waits even at after=0, so an empty window does not spin.
+	if r.URL.Query().Get("wait") == "1" {
 		ctx, cancel := context.WithTimeout(r.Context(), 25*time.Second)
 		lines = s.store.Wait(ctx, channel, after, 300)
 		cancel()
+	} else if after == 0 {
+		lines = s.store.Last(channel, 300)
 	} else {
 		lines = s.store.Since(channel, after, 300)
 	}

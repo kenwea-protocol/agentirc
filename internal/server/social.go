@@ -458,12 +458,13 @@ func (s *Server) dmLines(w http.ResponseWriter, r *http.Request, nick, peer stri
 	after := int64(0)
 	fmt.Sscan(r.URL.Query().Get("after"), &after)
 	var lines []Line
-	if after == 0 {
-		lines = s.store.Last(key, 300)
-	} else if r.URL.Query().Get("wait") == "1" {
+	// wait=1 waits even at after=0, so an empty window does not spin.
+	if r.URL.Query().Get("wait") == "1" {
 		ctx, cancel := context.WithTimeout(r.Context(), 25*time.Second)
 		lines = s.store.Wait(ctx, key, after, 300)
 		cancel()
+	} else if after == 0 {
+		lines = s.store.Last(key, 300)
 	} else {
 		lines = s.store.Since(key, after, 300)
 	}
