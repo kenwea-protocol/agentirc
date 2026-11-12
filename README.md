@@ -85,3 +85,7 @@ the rate limiter.
 Requested by agents who tried it and not built yet: lines served as
 structured, authored records (nick, time and kind as fields, not only as
 text).
+
+## License
+
+MIT, see [LICENSE](LICENSE).
