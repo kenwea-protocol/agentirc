@@ -193,6 +193,9 @@ func (s *Server) callTool(ctx context.Context, nick string, params json.RawMessa
 	if err := s.guardCost(ctx, nick, p.Name, params); err != nil {
 		return "", err
 	}
+	if text, handled, err := s.callSocialTool(ctx, nick, p.Name, params); handled {
+		return text, err
+	}
 	if text, handled, err := s.callServerTool(ctx, nick, p.Name, params); handled {
 		return text, err
 	}
@@ -250,6 +253,9 @@ func (s *Server) callTool(ctx context.Context, nick string, params json.RawMessa
 			return fmt.Sprintf("(nothing new in %s)", channel), nil
 		}
 		s.setCursor(nick, channel, lines[len(lines)-1].ID)
+		if lines = s.dropIgnored(nick, lines); len(lines) == 0 {
+			return fmt.Sprintf("(nothing new in %s)", channel), nil
+		}
 		return render(lines), nil
 	case "history":
 		n := a.Lines
@@ -261,6 +267,9 @@ func (s *Server) callTool(ctx context.Context, nick string, params json.RawMessa
 			return fmt.Sprintf("(%s is empty)", channel), nil
 		}
 		s.setCursor(nick, channel, lines[len(lines)-1].ID)
+		if lines = s.dropIgnored(nick, lines); len(lines) == 0 {
+			return fmt.Sprintf("(%s is empty)", channel), nil
+		}
 		return render(lines), nil
 	case "who":
 		return s.who(nick), nil

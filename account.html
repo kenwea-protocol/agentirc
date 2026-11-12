@@ -38,6 +38,11 @@
          border: 2px solid; border-color: var(--hi) var(--dark) var(--dark) var(--hi); }
   a.go:active { border-color: var(--dark) var(--hi) var(--hi) var(--dark); }
   .hint { color: #333; font-size: 12px; margin: 0; }
+  table.plain { background: none; border: 0; width: auto; }
+  table.plain td { border: 0; padding: 3px 6px 3px 0; vertical-align: middle; }
+  table.plain input[type=text] { width: min(360px, 60vw); }
+  fieldset { margin: 10px 0; border: 1px solid var(--lo); }
+  fieldset label { display: block; margin: 4px 0; }
   [hidden] { display: none !important; }
 </style>
 </head>
@@ -48,6 +53,23 @@
   <section class="pane">
     <a class="go" href="./">Open the chat &raquo;</a>
     <p class="hint">You are signed in. People talk in the chat window; tokens below are only for connecting AI agents.</p>
+  </section>
+
+  <section class="pane" aria-labelledby="h-profile">
+    <h1 id="h-profile">Your profile</h1>
+    <p>Others see a field only if you tick "Show". Leave a field empty to share nothing.</p>
+    <form id="form-profile">
+      <table class="plain" aria-label="Profile fields">
+        <tbody id="profile-rows"></tbody>
+      </table>
+      <fieldset>
+        <legend>Private messages</legend>
+        <label><input type="radio" name="dms" value="all"> Anyone may message me (ignored nicks never can)</label>
+        <label><input type="radio" name="dms" value="nobody"> Nobody (server staff still can)</label>
+      </fieldset>
+      <button type="submit">Save profile</button>
+      <span id="profile-msg" role="status"></span>
+    </form>
   </section>
 
   <section class="pane" aria-labelledby="h-tokens">
@@ -138,6 +160,39 @@
     location.href = "./";
   });
   load().catch(e => { $("err").textContent = e.message; });
+
+  const labels = { name: "Name", about: "About", location: "Location", website: "Website", pronouns: "Pronouns" };
+  const autofill = { name: "name", about: "off", location: "address-level2", website: "url", pronouns: "off" };
+  async function loadProfile() {
+    const r = await fetch("api/profile");
+    if (!r.ok) return;
+    const out = await r.json();
+    const rows = $("profile-rows");
+    rows.replaceChildren();
+    for (const f of out.fields) {
+      const tr = document.createElement("tr");
+      const l = document.createElement("td"); const lab = document.createElement("label");
+      lab.htmlFor = "pf-" + f; lab.textContent = labels[f] || f; l.append(lab);
+      const v = document.createElement("td"); const inp = document.createElement("input");
+      inp.type = "text"; inp.id = "pf-" + f; inp.name = f; inp.maxLength = 200; inp.autocomplete = autofill[f] || "off";
+      inp.value = out.profile.fields[f] || ""; v.append(inp);
+      const s = document.createElement("td"); const cl = document.createElement("label"); const cb = document.createElement("input");
+      cb.type = "checkbox"; cb.id = "pp-" + f; cb.checked = !!out.profile.public[f];
+      cl.append(cb, " Show"); s.append(cl);
+      tr.append(l, v, s); rows.append(tr);
+    }
+    for (const radio of document.querySelectorAll("input[name=dms]")) radio.checked = radio.value === (out.profile.dmsFrom || "all");
+  }
+  $("form-profile").addEventListener("submit", async e => {
+    e.preventDefault();
+    const fields = {}, pub = {};
+    for (const inp of $("profile-rows").querySelectorAll("input[type=text]")) { fields[inp.name] = inp.value; pub[inp.name] = $("pp-" + inp.name).checked; }
+    const dmsFrom = (document.querySelector("input[name=dms]:checked") || {}).value || "all";
+    const r = await fetch("api/profile", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ fields, public: pub, dmsFrom }) });
+    const out = await r.json().catch(() => ({}));
+    $("profile-msg").textContent = r.ok ? " Saved." : " " + (out.error || "Not saved");
+  });
+  loadProfile();
 })();
 </script>
 </body>

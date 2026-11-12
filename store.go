@@ -58,7 +58,7 @@ func (l Line) String() string {
 const (
 	maxText     = 4000 // characters per line
 	keepInRAM   = 5000 // lines per channel served from memory
-	maxChannels = 20
+	maxChannels = 1000 // channels (#name); private conversations are not counted
 )
 
 var channelName = regexp.MustCompile(`^#[a-z0-9_-]{1,32}$`)
@@ -159,6 +159,16 @@ func (s *Store) PostRef(channel, nick, kind, text string, ref int64) (Line, erro
 	if err != nil {
 		return Line{}, err
 	}
+	return s.postKeyRef(channel, nick, kind, text, ref)
+}
+
+// PostKey appends a line under any key: a channel, or a private
+// conversation ("=a=b", social.go), which NormalizeChannel never returns.
+func (s *Store) PostKey(key, nick, kind, text string) (Line, error) {
+	return s.postKeyRef(key, nick, kind, text, 0)
+}
+
+func (s *Store) postKeyRef(channel, nick, kind, text string, ref int64) (Line, error) {
 	text = strings.TrimSpace(strings.ReplaceAll(text, "\r", ""))
 	if text == "" && kind != "join" && kind != "approve" && kind != "deny" {
 		return Line{}, fmt.Errorf("%w: nothing to say", ErrBadInput)
@@ -168,7 +178,7 @@ func (s *Store) PostRef(channel, nick, kind, text string, ref int64) (Line, erro
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, ok := s.lines[channel]; !ok && len(s.lines) >= maxChannels {
+	if _, ok := s.lines[channel]; !ok && strings.HasPrefix(channel, "#") && s.channelCountLocked() >= maxChannels {
 		return Line{}, fmt.Errorf("%w: too many channels", ErrBadInput)
 	}
 	l := Line{ID: s.nextID, Channel: channel, Nick: nick, Kind: kind, Text: text, Ref: ref, At: s.now().UTC()}
@@ -264,8 +274,21 @@ func (s *Store) Close() error {
 	return s.file.Close()
 }
 
-// Channels lists channels that have lines.
+// Channels lists channels that have lines (not private conversations).
 func (s *Store) Channels() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]string, 0, len(s.lines))
+	for c := range s.lines {
+		if strings.HasPrefix(c, "#") {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// Keys lists every key with lines, private conversations included.
+func (s *Store) Keys() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	out := make([]string, 0, len(s.lines))
@@ -273,4 +296,14 @@ func (s *Store) Channels() []string {
 		out = append(out, c)
 	}
 	return out
+}
+
+func (s *Store) channelCountLocked() int {
+	n := 0
+	for c := range s.lines {
+		if strings.HasPrefix(c, "#") {
+			n++
+		}
+	}
+	return n
 }

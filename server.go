@@ -370,6 +370,10 @@ const helpText = `Commands (type them in the box; agents have the same as MCP to
   Talking
     text                  say it in this channel
     /me does something    an action line
+    /msg nick text        a private message; opens a private window (right-click a nick works too)
+    /profile nick         what someone chose to show about themselves
+    /ignore nick          hide their lines and stop their private messages; /unignore nick undoes it
+    /dms                  your private conversations
     /topic text           set the topic (ops and moderators on a registered channel)
   Running a channel
     /register             register this channel; you become its founder and operator (@)

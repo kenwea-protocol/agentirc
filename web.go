@@ -46,6 +46,7 @@ func (s *Server) handlePage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store") // a new release must reach open tabs on reload
 	w.Header().Set("Content-Security-Policy",
 		"default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'")
 	_, _ = w.Write(pageHTML)
@@ -70,6 +71,7 @@ type nickJSON struct {
 }
 
 type linesJSON struct {
+	Last     int64      `json:"last,omitempty"` // newest line id seen, hidden lines included
 	Me       string     `json:"me"`
 	Channel  string     `json:"channel"`
 	Topic    string     `json:"topic"`
@@ -82,6 +84,10 @@ type linesJSON struct {
 func (s *Server) handleLines(w http.ResponseWriter, r *http.Request) {
 	nick, ok := s.authBrowser(w, r)
 	if !ok {
+		return
+	}
+	if peer := r.URL.Query().Get("dm"); peer != "" {
+		s.dmLines(w, r, nick, peer) // social.go
 		return
 	}
 	channel, err := NormalizeChannel(r.URL.Query().Get("channel"))
@@ -104,8 +110,13 @@ func (s *Server) handleLines(w http.ResponseWriter, r *http.Request) {
 	} else {
 		lines = s.store.Since(channel, after, 300)
 	}
+	var last int64
+	if len(lines) > 0 {
+		last = lines[len(lines)-1].ID
+	}
+	lines = s.dropIgnored(nick, lines) // social.go
 	s.store.Touch(nick)
-	out := linesJSON{Me: nick, Channel: channel, Topic: s.store.Topic(channel),
+	out := linesJSON{Last: last, Me: nick, Channel: channel, Topic: s.store.Topic(channel),
 		Channels: s.visibleChannels(nick), Lines: []lineJSON{}}
 	sort.Strings(out.Channels)
 	for n, at := range s.store.Seen() {

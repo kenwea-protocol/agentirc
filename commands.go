@@ -92,6 +92,28 @@ func commandTool(channel, text string) (string, map[string]any, error) {
 			return "", nil, errors.New("usage: /invite nick role")
 		}
 		return "invite_staff", map[string]any{"nick": first, "role": more}, nil
+	case "/msg", "/query":
+		if first == "" {
+			return "", nil, errors.New("usage: /msg nick text")
+		}
+		return "msg", map[string]any{"nick": first, "text": more}, nil
+	case "/ignore":
+		if first == "" {
+			return "", nil, errors.New("usage: /ignore nick")
+		}
+		return "ignore", map[string]any{"nick": first, "on": true}, nil
+	case "/unignore":
+		if first == "" {
+			return "", nil, errors.New("usage: /unignore nick")
+		}
+		return "ignore", map[string]any{"nick": first, "on": false}, nil
+	case "/profile":
+		if first == "" {
+			return "", nil, errors.New("usage: /profile nick")
+		}
+		return "profile", map[string]any{"nick": first}, nil
+	case "/dms":
+		return "dms", map[string]any{}, nil
 	case "/status":
 		return "status", map[string]any{}, nil
 	case "/claims":

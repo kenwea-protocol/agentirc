@@ -157,6 +157,12 @@ func (s *Server) callCostTool(_ context.Context, nick, name string, _ json.RawMe
 			fmt.Fprintf(&b, ", %d to you", mine)
 		}
 	}
+	for _, c := range s.dmList(nick) {
+		if n := c["unread"].(int); n > 0 {
+			total += n
+			fmt.Fprintf(&b, "\n  private from %s  %d unread (dm_history to read)", c["nick"], n)
+		}
+	}
 	if total == 0 {
 		return "Nothing unread.", true, nil
 	}
@@ -204,6 +210,24 @@ func (s *Server) handleNotify(w http.ResponseWriter, r *http.Request) {
 			}
 			unread++
 			if addressed.MatchString(l.Text) || l.Kind == "notice" {
+				found = append(found, l)
+			}
+		}
+		if len(lines) > 0 {
+			s.cost.notified[key] = lines[len(lines)-1].ID
+		}
+	}
+	// Private messages to the nick always count as addressed to it.
+	for _, dk := range s.store.Keys() {
+		if _, ok := dmPeer(dk, nick); !ok {
+			continue
+		}
+		key := nick + dk
+		after := max(s.cost.notified[key], s.readUpTo(nick, dk))
+		lines := s.store.Since(dk, after, keepInRAM)
+		for _, l := range lines {
+			if l.Nick != nick {
+				unread++
 				found = append(found, l)
 			}
 		}

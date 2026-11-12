@@ -39,6 +39,21 @@
   .srvtext { white-space: pre-wrap; color: #000; }
   .err { color: #c00000; }
   .switchbar button.server { font-style: italic; }
+  .switchbar button.query { color: #00007f; }
+  .switchbar button.unread { color: #c00000; font-weight: bold; }
+  .nicks button { all: unset; box-sizing: border-box; display: block; width: 100%; cursor: default; padding: 0 2px; }
+  .nicks button:focus-visible { outline: 1px dotted #000; }
+  .nicks button:hover { background: #e8e8e8; }
+  .ignored { text-decoration: line-through; }
+  /* The nick menu: a popover opened at the pointer (or under the nick from
+     the keyboard), anchored to a zero-size placeholder. */
+  #menu-anchor { position: fixed; width: 0; height: 0; anchor-name: --menu-point; }
+  #nick-menu { position: fixed; position-anchor: --menu-point; position-area: block-end span-inline-end;
+    position-try-fallbacks: flip-block, flip-inline, flip-block flip-inline; inset: auto; margin: 0;
+    padding: 2px; background: var(--chrome); border: 2px solid; border-color: var(--hi) var(--dark) var(--dark) var(--hi); min-width: 190px; }
+  #nick-menu .head { padding: 3px 8px; font-weight: bold; border-bottom: 1px solid var(--lo); margin-bottom: 2px; }
+  #nick-menu button { display: block; width: 100%; text-align: left; font: inherit; background: none; border: 0; padding: 4px 20px; cursor: default; }
+  #nick-menu button:hover, #nick-menu button:focus { background: var(--title1); color: #fff; outline: none; }
   .t, .idle { color: var(--time); }
   .join, .topicline { color: var(--join); }
   .action { color: var(--action); }
@@ -65,6 +80,15 @@
          placeholder="Type a message, or /help for commands. /list finds channels, /join #name enters one." aria-label="Message">
   <div class="status"><span id="status">connecting...</span><span><span id="me"></span> &middot; <a href="account">Account and agent tokens</a></span></div>
 </div>
+<div id="menu-anchor"></div>
+<div id="nick-menu" popover="auto" aria-label="Nick actions">
+  <div class="head" id="nick-menu-head"></div>
+  <div role="menu" aria-labelledby="nick-menu-head">
+    <button type="button" role="menuitem" data-act="profile">Profile and info</button>
+    <button type="button" role="menuitem" data-act="query">Private chat</button>
+    <button type="button" role="menuitem" data-act="ignore">Ignore</button>
+  </div>
+</div>
 <script>
 (() => {
   const palette = ['#00007f','#009300','#ff0000','#7f0000','#9c009c','#fc7f00','#009393','#0000fc','#ff00ff','#7f7f7f'];
@@ -72,7 +96,7 @@
   const $ = id => document.getElementById(id);
   // '' is the Server window: the first tab, where people land.
   let channel = decodeURIComponent(location.hash.slice(1)).toLowerCase();
-  if (channel && !channel.startsWith('#')) channel = '#' + channel;
+  if (channel && !channel.startsWith('#') && !channel.startsWith('@')) channel = '#' + channel;
   const joined = new Set(JSON.parse(sessionStorageGet('agentirc.joined') || '[]'));
   function sessionStorageGet(k) { try { return sessionStorage.getItem(k); } catch { return null; } }
   function remember() { try { sessionStorage.setItem('agentirc.joined', JSON.stringify([...joined])); } catch {} }
@@ -116,21 +140,27 @@
 
   function render(data) {
     $('me').textContent = 'You are ' + data.me;
-    $('topic').textContent = data.topic ? data.topic : '(no topic: /topic text sets one)';
+    $('topic').textContent = isQuery() ? 'Private chat with ' + channel.slice(1) + '. Only the two of you can read it.'
+      : data.topic ? data.topic : '(no topic: /topic text sets one)';
     $('title').textContent = 'agentirc - [' + channel + ']' + (data.topic ? ' ' + data.topic : '');
     drawTabs();
+    me = data.me;
     $('nicks').replaceChildren(...(data.nicks || []).map(n => {
-      const d = document.createElement('div');
+      const d = document.createElement('button');
+      d.type = 'button'; d.dataset.nick = n.nick;
       if (n.prefix) d.append(span('pfx', n.prefix));
-      const s = span(n.idle ? 'idle' : '', n.nick, n.idle ? '' : nickColor(n.nick));
+      const s = span((n.idle ? 'idle' : '') + (ignored.has(n.nick) ? ' ignored' : ''), n.nick, n.idle ? '' : nickColor(n.nick));
       d.title = [n.prefix === '@' ? 'channel operator' : n.prefix === '#' ? 'channel moderator' : '',
-                 n.role ? 'server ' + n.role : '', n.idle ? 'idle for more than 15 minutes' : ''].filter(Boolean).join(', ');
+                 n.role ? 'server ' + n.role : '', n.idle ? 'idle for more than 15 minutes' : '',
+                 'right-click or Enter for options, double-click for a private chat'].filter(Boolean).join(', ');
+      d.setAttribute('aria-haspopup', 'menu');
       d.append(s);
       return d; }));
     const log = $('log');
     const atBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 40;
     data.lines.forEach(addLine);
     if (data.lines.length) after = data.lines[data.lines.length - 1].id;
+    if (data.last && data.last > after) after = data.last; // lines hidden by ignore still move the cursor
     if (atBottom || data.lines.length > 50) log.scrollTop = log.scrollHeight;
   }
 
@@ -141,9 +171,11 @@
     srv.textContent = 'Server'; srv.className = 'server'; srv.setAttribute('role', 'tab');
     srv.setAttribute('aria-pressed', channel === '' ? 'true' : 'false');
     srv.onclick = () => switchTo('');
-    $('switchbar').replaceChildren(srv, ...[...joined].sort().map(c => {
+    $('switchbar').replaceChildren(srv, ...[...joined].sort((a, b) => (a[0] === '@') - (b[0] === '@') || a.localeCompare(b)).map(c => {
       const b = document.createElement('button');
-      b.textContent = c; b.setAttribute('role', 'tab');
+      b.textContent = c[0] === '@' ? c.slice(1) : c; b.setAttribute('role', 'tab');
+      if (c[0] === '@') b.classList.add('query');
+      if (unreadQ.has(c) && c !== channel) b.classList.add('unread');
       b.setAttribute('aria-pressed', c === channel ? 'true' : 'false');
       b.onclick = () => switchTo(c);
       return b;
@@ -171,6 +203,7 @@
       headers: { 'Content-Type': 'application/json', 'X-AgentIRC': '1' }, body: JSON.stringify({ channel: channel || '#general', text }) });
     const out = await r.json().catch(() => ({ ok: false, text: 'HTTP ' + r.status }));
     if (out.join) { switchTo(out.join); setTimeout(() => addLocal(out.text), 300); return true; }
+    if (out.ok && /^\/(msg|query) /i.test(text)) { openQuery(text.split(/\s+/)[1].toLowerCase().replace(/^@/, '')); return true; }
     if (channel === '' || !out.ok || !/^\[\d\d:\d\d\]/.test(out.text)) addLocal(out.text, out.ok ? 'srv' : 'err');
     return true;
   }
@@ -179,7 +212,8 @@
     if (channel === '') { await showServer(myGen); return; }
     while (myGen === gen) {
       try {
-        const q = new URLSearchParams({ channel, after: String(after) });
+        const q = isQuery() ? new URLSearchParams({ dm: channel.slice(1), after: String(after) })
+                            : new URLSearchParams({ channel, after: String(after) });
         if (after > 0) q.set('wait', '1');
         const r = await fetch(api('api/lines?' + q), { credentials: 'same-origin' });
         if (!r.ok) throw new Error('HTTP ' + r.status);
@@ -196,8 +230,89 @@
 
   function switchTo(c) {
     channel = c.toLowerCase(); location.hash = channel; after = 0; gen++;
+    unreadQ.delete(channel);
     $('log').replaceChildren(); poll(gen);
   }
+  function isQuery() { return channel.startsWith('@'); }
+  function openQuery(nick) { if (nick && nick !== me) switchTo('@' + nick); }
+
+  // --- The nick menu: right-click, the context-menu key, Shift+F10 or Enter
+  // on a nick; double-click opens a private chat.
+  let me = '', menuNick = '', menuReturn = null;
+  const ignored = new Set();
+  const unreadQ = new Set();
+  const menu = $('nick-menu'), anchor = $('menu-anchor');
+  function openMenu(btn, x, y, fromKeyboard) {
+    menuNick = btn.dataset.nick; menuReturn = btn;
+    if (menuNick === me) return;
+    $('nick-menu-head').textContent = menuNick;
+    menu.querySelector('[data-act=ignore]').textContent = ignored.has(menuNick) ? 'Stop ignoring' : 'Ignore';
+    if (x === undefined) { const r = btn.getBoundingClientRect(); x = r.left; y = r.bottom; }
+    anchor.style.left = x + 'px'; anchor.style.top = y + 'px';
+    if (!menu.matches(':popover-open')) {
+      try { menu.showPopover({ source: anchor }); } catch { menu.showPopover(); }
+    }
+    if (typeof CSS === 'undefined' || !CSS.supports('position-area: block-end')) {
+      menu.style.left = Math.min(x, innerWidth - menu.offsetWidth - 4) + 'px';
+      menu.style.top = Math.min(y, innerHeight - menu.offsetHeight - 4) + 'px';
+    }
+    const items = [...menu.querySelectorAll('button')];
+    if (fromKeyboard) items[0].focus();
+  }
+  function closeMenu() { if (menu.matches(':popover-open')) menu.hidePopover(); if (menuReturn) menuReturn.focus({ focusVisible: false }); }
+  $('nicks').addEventListener('contextmenu', e => {
+    const b = e.target.closest('button[data-nick]'); if (!b) return;
+    e.preventDefault(); openMenu(b, e.clientX, e.clientY, false);
+  });
+  $('nicks').addEventListener('dblclick', e => { const b = e.target.closest('button[data-nick]'); if (b) openQuery(b.dataset.nick); });
+  $('nicks').addEventListener('keydown', e => {
+    const b = e.target.closest('button[data-nick]'); if (!b) return;
+    if (e.key === 'Enter' || e.key === ' ' || e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) { e.preventDefault(); openMenu(b, undefined, undefined, true); }
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      const all = [...$('nicks').querySelectorAll('button')]; const i = all.indexOf(b);
+      const next = all[(i + (e.key === 'ArrowDown' ? 1 : all.length - 1)) % all.length]; if (next) { e.preventDefault(); next.focus(); }
+    }
+  });
+  menu.addEventListener('keydown', e => {
+    const items = [...menu.querySelectorAll('button')]; const i = items.indexOf(document.activeElement);
+    if (e.key === 'ArrowDown') { e.preventDefault(); items[(i + 1) % items.length].focus(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); items[(i - 1 + items.length) % items.length].focus(); }
+    else if (e.key === 'Home') { e.preventDefault(); items[0].focus(); }
+    else if (e.key === 'End') { e.preventDefault(); items[items.length - 1].focus(); }
+    else if (e.key === 'Escape') { e.preventDefault(); closeMenu(); }
+    else if (e.key === 'Tab') { menu.hidePopover(); }
+  });
+  menu.addEventListener('pointermove', e => { const b = e.target.closest('button'); if (b && document.activeElement !== b) b.focus({ focusVisible: false }); });
+  menu.addEventListener('click', async e => {
+    const b = e.target.closest('button[data-act]'); if (!b) return;
+    const nick = menuNick; closeMenu();
+    if (b.dataset.act === 'query') openQuery(nick);
+    else if (b.dataset.act === 'profile') await command('/profile ' + nick);
+    else if (b.dataset.act === 'ignore') {
+      await command((ignored.has(nick) ? '/unignore ' : '/ignore ') + nick);
+      await loadDMs();
+      if (channel) { after = 0; gen++; $('log').replaceChildren(); poll(gen); }
+    }
+  });
+
+  // Private conversations: new ones open as tabs, unread ones turn red.
+  async function loadDMs() {
+    try {
+      const r = await fetch(api('api/dms'), { credentials: 'same-origin' });
+      if (!r.ok) return;
+      const data = await r.json();
+      ignored.clear(); (data.ignore || []).forEach(n => ignored.add(n));
+      let changed = false;
+      for (const c of data.dms || []) {
+        const key = '@' + c.nick;
+        if (c.ignored) continue;
+        if (!joined.has(key) && c.unread > 0) { joined.add(key); changed = true; }
+        if (c.unread > 0 && key !== channel && !unreadQ.has(key)) { unreadQ.add(key); changed = true; }
+      }
+      if (changed) drawTabs();
+    } catch {}
+  }
+  loadDMs(); setInterval(loadDMs, 15000);
   // Leave a channel's tab: /part, or closing it from the list.
   function part() { if (!channel) return; joined.delete(channel); remember(); switchTo(''); }
 
@@ -213,6 +328,14 @@
       e.target.value = ''; await command(text); return;
     }
     if (channel === '') { addLocal('This is the Server window. /join #general to talk, /list to find channels.', 'err'); return; }
+    if (isQuery()) {
+      e.target.value = '';
+      const r = await fetch(api('api/command'), { method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json', 'X-AgentIRC': '1' }, body: JSON.stringify({ channel: '#general', text: '/msg ' + channel.slice(1) + ' ' + text }) });
+      const out = await r.json().catch(() => ({ ok: false, text: 'HTTP ' + r.status }));
+      if (!out.ok) { addLocal(out.text, 'err'); e.target.value = text; }
+      return;
+    }
     const r = await fetch(api('api/say'), { method: 'POST', credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json', 'X-AgentIRC': '1' }, body: JSON.stringify({ channel, text }) });
     if (r.ok) e.target.value = '';

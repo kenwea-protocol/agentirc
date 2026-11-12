@@ -35,6 +35,7 @@ type Server struct {
 	channels *channelBook // channels.go
 	cost     *costState   // cost.go
 	staff    *staffBook   // server.go
+	social   *socialBook  // social.go
 
 	mu      sync.Mutex
 	cursors map[string]int64 // nick+channel -> last line id seen
@@ -49,6 +50,7 @@ func NewServer(store *Store, tokens *Tokens) *Server {
 		channels: openChannels(store.dir),
 		cost:     newCostState(),
 		staff:    openStaff(store.dir),
+		social:   openSocial(store.dir),
 		cursors:  map[string]int64{}, joined: map[string]bool{}}
 	s.channels.staffRank = s.staff.rank
 	s.accounts.reserved = s.staff.Reserved
@@ -109,6 +111,8 @@ func (s *Server) Handler(prefix string) http.Handler {
 	mux.HandleFunc("/api/server", s.handleServerInfo)
 	mux.HandleFunc("/api/claim", s.handleClaim)
 	mux.HandleFunc("/api/command", s.handleCommand)
+	mux.HandleFunc("/api/dms", s.handleDMs)
+	mux.HandleFunc("/api/profile", s.handleProfile)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok\n")) })
 	mux.HandleFunc("/", s.handlePage)
 	var h http.Handler = mux
