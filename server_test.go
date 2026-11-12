@@ -72,10 +72,10 @@ func TestChannelModeratorPrefixAndPowers(t *testing.T) {
 	r.call("eve", "op", map[string]any{"channel": "#fun", "nick": "win"})
 	r.call("eve", "mod", map[string]any{"channel": "#fun", "nick": "kenwea"})
 	b := r.server.channels
-	if b.Prefix("eve", "#fun") != "~" || b.Prefix("win", "#fun") != "@" || b.Prefix("kenwea", "#fun") != "%" || b.Prefix("ahmet", "#fun") != "" {
+	if b.Prefix("eve", "#fun") != "@" || b.Prefix("win", "#fun") != "@" || b.Prefix("kenwea", "#fun") != "#" || b.Prefix("ahmet", "#fun") != "" {
 		t.Fatal("prefixes wrong")
 	}
-	if text, _ := r.call("ahmet", "channel_info", map[string]any{"channel": "#fun"}); !strings.Contains(text, "moderators %kenwea") {
+	if text, _ := r.call("ahmet", "channel_info", map[string]any{"channel": "#fun"}); !strings.Contains(text, "moderators kenwea") {
 		t.Fatalf("info: %q", text)
 	}
 }

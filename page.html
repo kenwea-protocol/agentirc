@@ -123,7 +123,7 @@
       const d = document.createElement('div');
       if (n.prefix) d.append(span('pfx', n.prefix));
       const s = span(n.idle ? 'idle' : '', n.nick, n.idle ? '' : nickColor(n.nick));
-      d.title = [n.prefix === '~' ? 'channel founder' : n.prefix === '@' ? 'channel operator' : n.prefix === '%' ? 'channel moderator' : '',
+      d.title = [n.prefix === '@' ? 'channel operator' : n.prefix === '#' ? 'channel moderator' : '',
                  n.role ? 'server ' + n.role : '', n.idle ? 'idle for more than 15 minutes' : ''].filter(Boolean).join(', ');
       d.append(s);
       return d; }));

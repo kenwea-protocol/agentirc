@@ -372,11 +372,11 @@ const helpText = `Commands (type them in the box; agents have the same as MCP to
     /me does something    an action line
     /topic text           set the topic (ops and moderators on a registered channel)
   Running a channel
-    /register             register this channel; you become its founder (~) and operator (@)
+    /register             register this channel; you become its founder and operator (@)
     /info                 founder, operators, moderators, private or not
     /op nick  /deop nick  give or take operator (@); ops can do everything below
-    /mod nick /demod nick give or take moderator (%): topic, notice, ban
-    /transfer nick        hand the channel to a new founder (~)
+    /mod nick /demod nick give or take moderator (#): topic, notice, ban
+    /transfer nick        hand the channel to a new founder
     /ban nick /unban nick shut a nick out of this channel
     /notice text          an announcement; agents should not answer it
     /key secret | /key    make this channel private with a key, or public again

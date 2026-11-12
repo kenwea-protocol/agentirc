@@ -29,7 +29,7 @@ import (
 type channelInfo struct {
 	Founder string    `json:"founder"`
 	Ops     []string  `json:"ops"`
-	Mods    []string  `json:"mods,omitempty"` // channel moderators (%)
+	Mods    []string  `json:"mods,omitempty"` // channel moderators (#)
 	Banned  []string  `json:"banned,omitempty"`
 	KeySalt string    `json:"keySalt,omitempty"`
 	KeyHash string    `json:"keyHash,omitempty"`
@@ -70,7 +70,7 @@ func (b *channelBook) canOp(c *channelInfo, nick string) bool {
 }
 
 // canModerate: may set the topic, send a notice, ban. Adds channel
-// moderators (%) and server moderators.
+// moderators (#) and server moderators.
 func (b *channelBook) canModerate(c *channelInfo, nick string) bool {
 	return b.canOp(c, nick) || slices.Contains(c.Mods, nick) || b.rank(nick) >= roleRank["moderator"]
 }
@@ -149,7 +149,8 @@ func (b *channelBook) TopicLocked(nick, channel string) bool {
 	return ok && !b.canModerate(c, nick)
 }
 
-// Prefix is the nick-list mark in channel: ~ founder, @ op, % moderator.
+// Prefix is the nick-list mark in channel: @ operator (the founder is one
+// too), # moderator. The operator's request on 2026-11-13.
 func (b *channelBook) Prefix(nick, channel string) string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -157,12 +158,10 @@ func (b *channelBook) Prefix(nick, channel string) string {
 	switch {
 	case !ok:
 		return ""
-	case c.Founder == nick:
-		return "~"
-	case c.isOp(nick):
+	case c.Founder == nick, c.isOp(nick):
 		return "@"
 	case slices.Contains(c.Mods, nick):
-		return "%"
+		return "#"
 	}
 	return ""
 }
@@ -176,8 +175,8 @@ func (b *channelBook) founderAndPrivate(channel string) (string, bool) {
 	return "", false
 }
 
-// RolesOf lists nick's channel marks ("~#dev", "@#general") in channels the
-// asker can see.
+// RolesOf lists nick's channel roles ("founder of #dev", "operator in
+// #general") in channels the asker can see.
 func (b *channelBook) RolesOf(nick, asker string) []string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -188,11 +187,11 @@ func (b *channelBook) RolesOf(nick, asker string) []string {
 		}
 		switch {
 		case c.Founder == nick:
-			out = append(out, "~"+name)
+			out = append(out, "founder of "+name)
 		case c.isOp(nick):
-			out = append(out, "@"+name)
+			out = append(out, "operator in "+name)
 		case slices.Contains(c.Mods, nick):
-			out = append(out, "%"+name)
+			out = append(out, "moderator in "+name)
 		}
 	}
 	slices.Sort(out)
@@ -382,10 +381,10 @@ func (b *channelBook) Info(nick, channel string) string {
 	if !ok {
 		return channel + " is not registered: anyone can talk in it, and register_channel makes you its founder."
 	}
-	s := fmt.Sprintf("%s: founder ~%s, operators @%s, registered %s", channel, c.Founder,
+	s := fmt.Sprintf("%s: founder %s, operators @%s, registered %s", channel, c.Founder,
 		strings.Join(c.Ops, " @"), c.Created.Format("2006-01-02"))
 	if len(c.Mods) > 0 {
-		s += ", moderators %" + strings.Join(c.Mods, " %")
+		s += ", moderators " + strings.Join(c.Mods, ", ")
 	}
 	if c.private() {
 		s += ", private (key needed to join)"
@@ -407,11 +406,11 @@ var channelTools = []map[string]any{
 		"inputSchema": schema(map[string]any{"channel": channelProp, "text": map[string]any{"type": "string"}}, "channel", "text")},
 	{"name": "op", "description": "Make a nick an operator of a registered channel. Operators only.",
 		"inputSchema": schema(map[string]any{"channel": channelProp, "nick": map[string]any{"type": "string"}}, "channel", "nick")},
-	{"name": "transfer", "description": "Hand a registered channel to another nick as its founder (~). The founder, or a server admin and above.",
+	{"name": "transfer", "description": "Hand a registered channel to another nick as its founder. The founder, or a server admin and above.",
 		"inputSchema": schema(map[string]any{"channel": channelProp, "nick": map[string]any{"type": "string"}}, "channel", "nick")},
-	{"name": "mod", "description": "Make a nick a moderator (%) of a registered channel: topic, notice, ban. Operators only.",
+	{"name": "mod", "description": "Make a nick a moderator (#) of a registered channel: topic, notice, ban. Operators only.",
 		"inputSchema": schema(map[string]any{"channel": channelProp, "nick": map[string]any{"type": "string"}}, "channel", "nick")},
-	{"name": "demod", "description": "Take moderator (%) status from a nick. Operators only.",
+	{"name": "demod", "description": "Take moderator (#) status from a nick. Operators only.",
 		"inputSchema": schema(map[string]any{"channel": channelProp, "nick": map[string]any{"type": "string"}}, "channel", "nick")},
 	{"name": "deop", "description": "Take operator status from a nick. Operators only; the founder stays an operator.",
 		"inputSchema": schema(map[string]any{"channel": channelProp, "nick": map[string]any{"type": "string"}}, "channel", "nick")},

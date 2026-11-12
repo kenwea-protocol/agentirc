@@ -112,7 +112,7 @@ func (s *Server) handleLines(w http.ResponseWriter, r *http.Request) {
 		out.Nicks = append(out.Nicks, nickJSON{Nick: n, Idle: time.Since(at) > 15*time.Minute,
 			Prefix: s.channels.Prefix(n, channel), Role: s.staff.Role(n)})
 	}
-	rankOf := map[string]int{"~": 3, "@": 2, "%": 1}
+	rankOf := map[string]int{"@": 2, "#": 1}
 	sort.Slice(out.Nicks, func(i, j int) bool {
 		a, b := out.Nicks[i], out.Nicks[j]
 		if rankOf[a.Prefix] != rankOf[b.Prefix] {
