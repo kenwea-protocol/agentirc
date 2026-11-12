@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
+	_ "embed"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -196,6 +197,9 @@ func (b *accountBook) Login(nick, password, client string) (string, error) {
 		want = a.Hash
 	}
 	b.mu.Unlock()
+	if ok && want == "" {
+		ok = false // a token nick's page-session holder has no password
+	}
 	if !ok {
 		// Spend the same time as a real check, so timing does not tell
 		// which nicks exist.
@@ -492,5 +496,84 @@ func (s *Server) accountRoutes(mux *http.ServeMux) {
 		default:
 			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "GET, POST or DELETE"})
 		}
+	})
+}
+
+//go:embed signin.html
+var signinHTML []byte
+
+//go:embed account.html
+var accountHTML []byte
+
+const pageCSP = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'"
+
+func servePage(w http.ResponseWriter, page []byte) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Content-Security-Policy", pageCSP)
+	_, _ = w.Write(page)
+}
+
+// TokenLogin starts a page session for a nick that signs in with a token
+// (nicks from the tokens file have no password). It keeps the session under
+// a password-less entry, which Login never accepts.
+func (b *accountBook) TokenLogin(token, client string) (string, string, error) {
+	if !b.logLimit.allow("ip " + client) {
+		return "", "", errSlowDown
+	}
+	nick, ok := b.tokens.Nick(token)
+	if !ok {
+		return "", "", errBadLogin
+	}
+	id := randomHex(32)
+	sum := sha256.Sum256([]byte(id))
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	a, ok := b.byNick[nick]
+	if !ok {
+		a = &account{Created: b.now().UTC()}
+		b.byNick[nick] = a
+	}
+	now := b.now()
+	kept := a.Sessions[:0]
+	for _, s := range a.Sessions {
+		if s.Expires.After(now) {
+			kept = append(kept, s)
+		}
+	}
+	a.Sessions = append(kept, webSession{Hash: hex.EncodeToString(sum[:]), Expires: now.Add(webSessionTTL).UTC()})
+	return id, nick, b.saveLocked()
+}
+
+// pageRoutes adds /account and /api/login-token.
+func (s *Server) pageRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("/account", func(w http.ResponseWriter, r *http.Request) {
+		if _, ok := s.accounts.FromCookie(r); !ok {
+			http.Redirect(w, r, "./", http.StatusSeeOther)
+			return
+		}
+		servePage(w, accountHTML)
+	})
+	mux.HandleFunc("/api/login-token", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || !sameOrigin(r) {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "POST JSON from this site only"})
+			return
+		}
+		var in struct{ Token string }
+		if json.NewDecoder(io.LimitReader(r.Body, 1024)).Decode(&in) != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad JSON"})
+			return
+		}
+		id, nick, err := s.accounts.TokenLogin(strings.TrimSpace(in.Token), clientAddr(r))
+		if err != nil {
+			msg := err.Error()
+			if errors.Is(err, errBadLogin) {
+				msg = "that token is not valid here"
+			}
+			writeJSON(w, errorStatus(err), map[string]string{"error": msg})
+			return
+		}
+		setSessionCookie(w, r, id, int(webSessionTTL/time.Second))
+		writeJSON(w, http.StatusOK, map[string]string{"nick": nick})
 	})
 }

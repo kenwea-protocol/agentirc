@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -238,9 +239,21 @@ func TestPageNeedsLogin(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	body, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
-	if resp.StatusCode != http.StatusUnauthorized || !strings.HasPrefix(resp.Header.Get("WWW-Authenticate"), "Basic") {
+	// Without a session the sign-in page is served, never the chat, and no
+	// Basic challenge opens the browser's own login box.
+	if resp.StatusCode != http.StatusOK || resp.Header.Get("WWW-Authenticate") != "" ||
+		!strings.Contains(string(body), `autocomplete="current-password"`) || strings.Contains(string(body), `id="log"`) {
 		t.Errorf("page without login = %d %q", resp.StatusCode, resp.Header.Get("WWW-Authenticate"))
+	}
+	resp, err = http.Get(r.srv.URL + "/irc/api/lines")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("api without login = %d", resp.StatusCode)
 	}
 }
 

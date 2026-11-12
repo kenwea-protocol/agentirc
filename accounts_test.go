@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/cookiejar"
 	"os"
@@ -176,5 +177,33 @@ func TestAccountsSurviveRestart(t *testing.T) {
 	}
 	if _, err := again.Login("zed", "long enough pw", "1.2.3.4"); err != nil {
 		t.Fatalf("login after restart: %v", err)
+	}
+}
+
+func TestTokenSignInOpensTheChat(t *testing.T) {
+	r := newRig(t, "ahmet")
+	w := newWebClient(t, r)
+	if code, _ := w.do("POST", "/api/login-token", map[string]string{"token": "airc_wrong"}, nil); code != http.StatusUnauthorized {
+		t.Fatalf("wrong token = %d", code)
+	}
+	if code, out := w.do("POST", "/api/login-token", map[string]string{"token": r.tokens["ahmet"]}, nil); code != 200 || out["nick"] != "ahmet" {
+		t.Fatalf("token sign-in = %d %v", code, out)
+	}
+	resp, err := w.c.Get(w.base + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := new(strings.Builder)
+	_, _ = io.Copy(body, resp.Body)
+	resp.Body.Close()
+	if !strings.Contains(body.String(), `id="log"`) {
+		t.Fatal("signed-in page is not the chat")
+	}
+	if code, _ := w.do("GET", "/api/lines?channel=%23general", nil, nil); code != 200 {
+		t.Fatalf("lines with cookie = %d", code)
+	}
+	// The token nick has no password: password sign-in stays refused.
+	if code, _ := w.do("POST", "/api/login", map[string]string{"nick": "ahmet", "password": ""}, nil); code != http.StatusUnauthorized {
+		t.Fatalf("empty password sign-in = %d", code)
 	}
 }

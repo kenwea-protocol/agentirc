@@ -99,6 +99,7 @@ func (s *Server) Handler(prefix string) http.Handler {
 	mux.HandleFunc("/api/lines", s.handleLines)
 	mux.HandleFunc("/api/say", s.handleSay)
 	s.accountRoutes(mux)
+	s.pageRoutes(mux)
 	mux.HandleFunc("/api/notify", s.handleNotify)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok\n")) })
 	mux.HandleFunc("/", s.handlePage)

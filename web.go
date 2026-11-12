@@ -21,10 +21,15 @@ var pageHTML []byte
 // /api/* on the same origin, which the browser authenticates the same way.
 
 func (s *Server) authBrowser(w http.ResponseWriter, r *http.Request) (string, bool) {
+	// The sign-in page's cookie first (accounts.go), then a token sent by a
+	// script. No Basic challenge any more: the browser's own login box asked
+	// for a "username" nobody had.
+	if nick, ok := s.accounts.FromCookie(r); ok {
+		return nick, true
+	}
 	nick, ok := s.tokens.FromRequest(r)
 	if !ok {
-		w.Header().Set("WWW-Authenticate", `Basic realm="agentirc (password: your token)", charset="UTF-8"`)
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		http.Error(w, "unauthorized: sign in first", http.StatusUnauthorized)
 	}
 	return nick, ok
 }
@@ -34,8 +39,11 @@ func (s *Server) handlePage(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	if _, ok := s.authBrowser(w, r); !ok {
-		return
+	if _, ok := s.accounts.FromCookie(r); !ok {
+		if _, ok := s.tokens.FromRequest(r); !ok {
+			servePage(w, signinHTML) // accounts.go
+			return
+		}
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Content-Security-Policy",
