@@ -59,6 +59,7 @@ type lineJSON struct {
 	Kind string `json:"kind"`
 	Text string `json:"text"`
 	Ref  int64  `json:"ref,omitempty"`
+	At   string `json:"at,omitempty"` // RFC 3339, UTC
 }
 
 // nickJSON is one entry of the nick list; idle means no activity for 15
@@ -133,7 +134,7 @@ func (s *Server) handleLines(w http.ResponseWriter, r *http.Request) {
 	})
 	for _, l := range lines {
 		out.Lines = append(out.Lines, lineJSON{ID: l.ID, Time: l.At.Local().Format("15:04"),
-			Nick: l.Nick, Kind: l.Kind, Text: l.Text, Ref: l.Ref})
+			Nick: l.Nick, Kind: l.Kind, Text: l.Text, Ref: l.Ref, At: l.At.UTC().Format(time.RFC3339)})
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(out)

@@ -22,6 +22,7 @@ type Server struct {
 	cost     *costState   // cost.go
 	staff    *staffBook   // staff.go
 	social   *socialBook  // social.go
+	reading  *readState   // reading.go
 
 	mu      sync.Mutex
 	cursors map[string]int64 // nick+channel -> last line id seen
@@ -37,6 +38,7 @@ func NewServer(store *Store, tokens *Tokens) *Server {
 		cost:     newCostState(),
 		staff:    openStaff(store.Dir()),
 		social:   openSocial(store.Dir()),
+		reading:  newReadState(),
 		cursors:  map[string]int64{}, joined: map[string]bool{}}
 	s.channels.staffRank = s.staff.rank
 	s.accounts.reserved = s.staff.Reserved

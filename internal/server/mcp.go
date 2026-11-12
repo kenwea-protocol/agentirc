@@ -55,6 +55,9 @@ func schema(props map[string]any, required ...string) map[string]any {
 
 var channelProp = map[string]any{"type": "string", "description": "Channel, e.g. #general (the default)."}
 
+var formatProp = map[string]any{"type": "string", "enum": []string{"text", "json"},
+	"description": "text (default): mIRC-style lines. json: records with id, channel, nick, kind, text and at as separate fields."}
+
 var tools = []map[string]any{
 	{"name": "say", "description": "Say a line in a channel. action=true sends it as /me.",
 		"inputSchema": schema(map[string]any{
@@ -62,15 +65,18 @@ var tools = []map[string]any{
 			"text":    map[string]any{"type": "string", "description": "What to say, up to 4000 characters."},
 			"action":  map[string]any{"type": "boolean"},
 		}, "text")},
-	{"name": "listen", "description": "Return lines you have not seen yet in a channel. With wait_seconds, wait up to that long (max 50) for the next line before returning; use it to wait for a reply.",
+	{"name": "listen", "description": "Return lines you have not seen yet in a channel. With wait_seconds, wait up to that long (max 50) for the next line before returning; use it to wait for a reply. mentions_only=true returns only lines addressed to you (@nick, nick:, or a NOTICE) and leaves the rest unread.",
 		"inputSchema": schema(map[string]any{
-			"channel":      channelProp,
-			"wait_seconds": map[string]any{"type": "integer", "minimum": 0, "maximum": 50},
+			"channel":       channelProp,
+			"wait_seconds":  map[string]any{"type": "integer", "minimum": 0, "maximum": 50},
+			"mentions_only": map[string]any{"type": "boolean"},
+			"format":        formatProp,
 		})},
 	{"name": "history", "description": "Return the last N lines of a channel (default 30, max 200).",
 		"inputSchema": schema(map[string]any{
 			"channel": channelProp,
 			"lines":   map[string]any{"type": "integer", "minimum": 1, "maximum": 200},
+			"format":  formatProp,
 		})},
 	{"name": "who", "description": "List nicks with when they were last active, the channels and their topics.",
 		"inputSchema": schema(map[string]any{})},
@@ -174,6 +180,9 @@ type toolArgs struct {
 	Action      bool   `json:"action"`
 	WaitSeconds int    `json:"wait_seconds"`
 	Lines       int    `json:"lines"`
+	// MentionsOnly and Format: reading.go.
+	MentionsOnly bool   `json:"mentions_only"`
+	Format       string `json:"format"`
 }
 
 func (s *Server) callTool(ctx context.Context, nick string, params json.RawMessage) (string, error) {
@@ -240,6 +249,9 @@ func (s *Server) callTool(ctx context.Context, nick string, params json.RawMessa
 	case "listen":
 		s.ensureJoined(channel, nick)
 		wait := min(max(a.WaitSeconds, 0), 50)
+		if a.MentionsOnly {
+			return s.listenMentions(ctx, nick, channel, time.Duration(wait)*time.Second, a.Format)
+		}
 		after := s.cursor(nick, channel)
 		var lines []Line
 		if wait > 0 {
@@ -250,13 +262,14 @@ func (s *Server) callTool(ctx context.Context, nick string, params json.RawMessa
 			lines = s.store.Since(channel, after, 100)
 		}
 		if len(lines) == 0 {
-			return fmt.Sprintf("(nothing new in %s)", channel), nil
+			return s.emptyListen(nick, channel, "nothing new in "+channel), nil
 		}
 		s.setCursor(nick, channel, lines[len(lines)-1].ID)
 		if lines = s.dropIgnored(nick, lines); len(lines) == 0 {
-			return fmt.Sprintf("(nothing new in %s)", channel), nil
+			return s.emptyListen(nick, channel, "nothing new in "+channel), nil
 		}
-		return render(lines), nil
+		s.listenedSome(nick, channel)
+		return renderAs(a.Format, lines)
 	case "history":
 		n := a.Lines
 		if n <= 0 {
@@ -270,7 +283,7 @@ func (s *Server) callTool(ctx context.Context, nick string, params json.RawMessa
 		if lines = s.dropIgnored(nick, lines); len(lines) == 0 {
 			return fmt.Sprintf("(%s is empty)", channel), nil
 		}
-		return render(lines), nil
+		return renderAs(a.Format, lines)
 	case "who":
 		return s.who(nick), nil
 	case "topic":
