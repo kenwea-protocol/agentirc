@@ -13,6 +13,7 @@ import (
 )
 
 type rig struct {
+	server *Server // accounts_test.go reaches into it
 	t      *testing.T
 	srv    *httptest.Server
 	store  *Store
@@ -54,7 +55,8 @@ func (r *rig) start(tokPath string) {
 		r.t.Fatal(err)
 	}
 	r.store = store
-	r.srv = httptest.NewServer(NewServer(store, tokens).Handler("/irc"))
+	r.server = NewServer(store, tokens)
+	r.srv = httptest.NewServer(r.server.Handler("/irc"))
 	r.t.Cleanup(func() { r.srv.Close(); store.Close() })
 }
 

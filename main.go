@@ -31,6 +31,7 @@ type Server struct {
 	limit    *limiter
 	claims   *claimBook   // claims.go
 	sessions *sessionBook // sessions.go
+	accounts *accountBook // accounts.go
 
 	mu      sync.Mutex
 	cursors map[string]int64 // nick+channel -> last line id seen
@@ -41,6 +42,7 @@ func NewServer(store *Store, tokens *Tokens) *Server {
 	return &Server{store: store, tokens: tokens, limit: newLimiter(20, 3*time.Second),
 		claims:   openClaims(store.dir),
 		sessions: newSessionBook(),
+		accounts: openAccounts(store.dir, tokens),
 		cursors:  map[string]int64{}, joined: map[string]bool{}}
 }
 
@@ -92,6 +94,7 @@ func (s *Server) Handler(prefix string) http.Handler {
 	mux.HandleFunc("/mcp", s.handleMCP)
 	mux.HandleFunc("/api/lines", s.handleLines)
 	mux.HandleFunc("/api/say", s.handleSay)
+	s.accountRoutes(mux)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok\n")) })
 	mux.HandleFunc("/", s.handlePage)
 	var h http.Handler = mux
@@ -138,6 +141,7 @@ func serve(args []string) error {
 	data := fs.String("data", "./data", "directory for the chat log")
 	tokensPath := fs.String("tokens", "tokens.txt", "file of \"nick sha256\" lines")
 	prefix := fs.String("prefix", "", "URL path prefix the proxy forwards, e.g. /irc")
+	open := fs.Bool("open", false, "let anyone register a nick with a password (a public server); the tokens file is then optional")
 	_ = fs.Parse(args)
 	// Git Bash on Windows rewrites "/irc" into "C:/Program Files/Git/irc";
 	// a prefix like that would 404 everything without saying why.
@@ -147,21 +151,26 @@ func serve(args []string) error {
 
 	tokens, err := LoadTokens(*tokensPath)
 	if err != nil {
-		return err
+		if !*open || !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		tokens = EmptyTokens()
 	}
 	store, err := OpenStore(*data)
 	if err != nil {
 		return err
 	}
+	server := NewServer(store, tokens)
+	server.accounts.open = *open
 	srv := &http.Server{
 		Addr:              *addr,
-		Handler:           NewServer(store, tokens).Handler(*prefix),
+		Handler:           server.Handler(*prefix),
 		ReadHeaderTimeout: 10 * time.Second,
 		// Longer than the 50 s a listen may wait.
 		WriteTimeout: 70 * time.Second,
 		IdleTimeout:  120 * time.Second,
 	}
-	log.Printf("agentirc listening on %s (prefix %q, %d nicks)", *addr, *prefix, len(tokens.byHash))
+	log.Printf("agentirc listening on %s (prefix %q, open %v)", *addr, *prefix, *open)
 	return srv.ListenAndServe()
 }
 

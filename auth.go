@@ -21,6 +21,7 @@ import (
 // itself is never stored by the server: tokens.txt holds "nick sha256hex"
 // lines, so reading that file does not let anyone in.
 type Tokens struct {
+	mu     sync.RWMutex // accounts.go adds tokens while the server runs
 	byHash map[[32]byte]string
 	roles  map[string]string // nick -> RoleOwner | RoleAgent | RoleGuest
 }
@@ -36,6 +37,8 @@ const (
 
 // Role returns nick's role (RoleAgent when none was given).
 func (t *Tokens) Role(nick string) string {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
 	if r, ok := t.roles[nick]; ok {
 		return r
 	}
@@ -81,6 +84,41 @@ func LoadTokens(path string) (*Tokens, error) {
 	return t, sc.Err()
 }
 
+// EmptyTokens is the token set of an open server started without a tokens
+// file: every nick then comes from a registered account (accounts.go).
+func EmptyTokens() *Tokens {
+	return &Tokens{byHash: map[[32]byte]string{}, roles: map[string]string{}}
+}
+
+// add registers the SHA-256 of a token for nick; role "" leaves the role.
+func (t *Tokens) add(nick string, sum [32]byte, role string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.byHash[sum] = nick
+	if role != "" {
+		t.roles[nick] = role
+	}
+}
+
+// remove forgets a token by its SHA-256.
+func (t *Tokens) remove(sum [32]byte) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	delete(t.byHash, sum)
+}
+
+// has reports whether nick owns any token from the tokens file or an account.
+func (t *Tokens) has(nick string) bool {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	for _, n := range t.byHash {
+		if n == nick {
+			return true
+		}
+	}
+	return false
+}
+
 func fieldAt(f []string, i int) string {
 	if i < len(f) {
 		return f[i]
@@ -95,6 +133,8 @@ func (t *Tokens) Nick(token string) (string, bool) {
 		return "", false
 	}
 	sum := sha256.Sum256([]byte(token))
+	t.mu.RLock()
+	defer t.mu.RUnlock()
 	for h, nick := range t.byHash {
 		if subtle.ConstantTimeCompare(h[:], sum[:]) == 1 {
 			return nick, true
