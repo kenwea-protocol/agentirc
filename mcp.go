@@ -88,6 +88,12 @@ func (s *Server) handleMCP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
+	presented := r.Header.Get("Mcp-Session-Id")
+	if r.Method == http.MethodDelete {
+		s.sessions.end(nick, presented)
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
 	if r.Method != http.MethodPost {
 		// No server-initiated stream: tools are request/response only.
 		http.Error(w, "POST only", http.StatusMethodNotAllowed)
@@ -104,6 +110,12 @@ func (s *Server) handleMCP(w http.ResponseWriter, r *http.Request) {
 			Error: &rpcError{Code: -32700, Message: "parse error (one JSON-RPC request per POST)"}})
 		return
 	}
+	if req.Method != "initialize" {
+		if status, msg := s.sessions.touch(nick, presented); status != 0 {
+			http.Error(w, msg, status)
+			return
+		}
+	}
 	if len(req.ID) == 0 { // a notification: nothing to answer
 		w.WriteHeader(http.StatusAccepted)
 		return
@@ -111,6 +123,12 @@ func (s *Server) handleMCP(w http.ResponseWriter, r *http.Request) {
 	resp := rpcResponse{JSONRPC: "2.0", ID: req.ID}
 	switch req.Method {
 	case "initialize":
+		id, status, msg := s.sessions.begin(nick, presented)
+		if status != 0 {
+			http.Error(w, msg, status)
+			return
+		}
+		w.Header().Set("Mcp-Session-Id", id)
 		resp.Result = map[string]any{
 			"protocolVersion": negotiatedVersion(req.Params),
 			"capabilities":    map[string]any{"tools": map[string]any{}},
@@ -165,6 +183,12 @@ func (s *Server) callTool(ctx context.Context, nick string, params json.RawMessa
 	}
 	if err := json.Unmarshal(params, &p); err != nil {
 		return "", errors.New("bad arguments")
+	}
+	if err := s.guardWrite(nick, p.Name, params); err != nil {
+		return "", err
+	}
+	if text, handled, err := s.callApprovalTool(ctx, nick, p.Name, params); handled {
+		return text, err
 	}
 	if text, handled, err := s.callClaimTool(ctx, nick, p.Name, params); handled {
 		return text, err

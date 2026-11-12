@@ -17,12 +17,14 @@ import (
 // Line is one line in a channel, the way mIRC shows it: a time, a nick and
 // what was said. Kind is "msg", "action" (/me), "topic" or "join".
 type Line struct {
-	ID      int64     `json:"id"`
-	Channel string    `json:"channel"`
-	Nick    string    `json:"nick"`
-	Kind    string    `json:"kind"`
-	Text    string    `json:"text"`
-	At      time.Time `json:"at"`
+	ID      int64  `json:"id"`
+	Channel string `json:"channel"`
+	Nick    string `json:"nick"`
+	Kind    string `json:"kind"`
+	// Ref points at another line: an approve/deny line refers to its ask.
+	Ref  int64     `json:"ref,omitempty"`
+	Text string    `json:"text"`
+	At   time.Time `json:"at"`
 }
 
 // String renders a line mIRC-style: "[21:55] <win> hello".
@@ -35,6 +37,17 @@ func (l Line) String() string {
 		return fmt.Sprintf("[%s] *** %s changes topic to '%s'", ts, l.Nick, l.Text)
 	case "join":
 		return fmt.Sprintf("[%s] *** %s has joined %s", ts, l.Nick, l.Channel)
+	case "ask":
+		return fmt.Sprintf("[%s] ?? <%s> asks #%d: %s", ts, l.Nick, l.ID, l.Text)
+	case "approve", "deny":
+		verb := "approved"
+		if l.Kind == "deny" {
+			verb = "denied"
+		}
+		if l.Text == "" {
+			return fmt.Sprintf("[%s] !! %s %s ask #%d", ts, l.Nick, verb, l.Ref)
+		}
+		return fmt.Sprintf("[%s] !! %s %s ask #%d: %s", ts, l.Nick, verb, l.Ref, l.Text)
 	default:
 		return fmt.Sprintf("[%s] <%s> %s", ts, l.Nick, l.Text)
 	}
@@ -135,12 +148,17 @@ func NormalizeChannel(c string) (string, error) {
 
 // Post appends a line and wakes every listener.
 func (s *Store) Post(channel, nick, kind, text string) (Line, error) {
+	return s.PostRef(channel, nick, kind, text, 0)
+}
+
+// PostRef is Post with a reference to another line (approvals).
+func (s *Store) PostRef(channel, nick, kind, text string, ref int64) (Line, error) {
 	channel, err := NormalizeChannel(channel)
 	if err != nil {
 		return Line{}, err
 	}
 	text = strings.TrimSpace(strings.ReplaceAll(text, "\r", ""))
-	if text == "" && kind != "join" {
+	if text == "" && kind != "join" && kind != "approve" && kind != "deny" {
 		return Line{}, fmt.Errorf("%w: nothing to say", ErrBadInput)
 	}
 	if len([]rune(text)) > maxText {
@@ -151,7 +169,7 @@ func (s *Store) Post(channel, nick, kind, text string) (Line, error) {
 	if _, ok := s.lines[channel]; !ok && len(s.lines) >= maxChannels {
 		return Line{}, fmt.Errorf("%w: too many channels", ErrBadInput)
 	}
-	l := Line{ID: s.nextID, Channel: channel, Nick: nick, Kind: kind, Text: text, At: s.now().UTC()}
+	l := Line{ID: s.nextID, Channel: channel, Nick: nick, Kind: kind, Text: text, Ref: ref, At: s.now().UTC()}
 	raw, _ := json.Marshal(l)
 	if _, err := s.file.Write(append(raw, '\n')); err != nil {
 		return Line{}, err
@@ -221,6 +239,20 @@ func (s *Store) Touch(nick string) {
 	s.mu.Lock()
 	s.seen[nick] = s.now().UTC()
 	s.mu.Unlock()
+}
+
+// Find returns the line with id, in any channel still held in memory.
+func (s *Store) Find(id int64) (Line, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, lines := range s.lines {
+		for _, l := range lines {
+			if l.ID == id {
+				return l, true
+			}
+		}
+	}
+	return Line{}, false
 }
 
 // Close closes the log file.

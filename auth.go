@@ -22,6 +22,24 @@ import (
 // lines, so reading that file does not let anyone in.
 type Tokens struct {
 	byHash map[[32]byte]string
+	roles  map[string]string // nick -> RoleOwner | RoleAgent | RoleGuest
+}
+
+// Roles, the optional third column of tokens.txt ("nick sha256 role").
+// owner answers approvals; guest may read but never write; agent is the
+// default and does everything else.
+const (
+	RoleOwner = "owner"
+	RoleAgent = "agent"
+	RoleGuest = "guest"
+)
+
+// Role returns nick's role (RoleAgent when none was given).
+func (t *Tokens) Role(nick string) string {
+	if r, ok := t.roles[nick]; ok {
+		return r
+	}
+	return RoleAgent
 }
 
 var nickName = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,15}$`)
@@ -33,7 +51,7 @@ func LoadTokens(path string) (*Tokens, error) {
 		return nil, err
 	}
 	defer f.Close()
-	t := &Tokens{byHash: map[[32]byte]string{}}
+	t := &Tokens{byHash: map[[32]byte]string{}, roles: map[string]string{}}
 	sc := bufio.NewScanner(f)
 	for n := 1; sc.Scan(); n++ {
 		line := strings.TrimSpace(sc.Text())
@@ -42,8 +60,16 @@ func LoadTokens(path string) (*Tokens, error) {
 		}
 		fields := strings.Fields(line)
 		raw, err := hex.DecodeString(fieldAt(fields, 1))
-		if len(fields) != 2 || !nickName.MatchString(fields[0]) || err != nil || len(raw) != 32 {
-			return nil, fmt.Errorf("%s:%d: want \"nick sha256hex\"", path, n)
+		if len(fields) < 2 || len(fields) > 3 || !nickName.MatchString(fields[0]) || err != nil || len(raw) != 32 {
+			return nil, fmt.Errorf("%s:%d: want \"nick sha256hex [owner|agent|guest]\"", path, n)
+		}
+		if len(fields) == 3 {
+			switch fields[2] {
+			case RoleOwner, RoleAgent, RoleGuest:
+				t.roles[fields[0]] = fields[2]
+			default:
+				return nil, fmt.Errorf("%s:%d: role must be owner, agent or guest", path, n)
+			}
 		}
 		var h [32]byte
 		copy(h[:], raw)

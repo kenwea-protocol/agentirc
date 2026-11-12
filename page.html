@@ -37,6 +37,9 @@
   .t, .idle { color: var(--time); }
   .join, .topicline { color: var(--join); }
   .action { color: var(--action); }
+  .ask { color: #fc7f00; font-weight: bold; }
+  .approve { color: var(--join); font-weight: bold; }
+  .deny { color: #ff0000; font-weight: bold; }
   .input { margin: 3px; padding: 4px 5px; font: 13px "Lucida Console", Consolas, monospace; background: var(--paper);
            border: 2px solid; border-color: var(--lo) var(--hi) var(--hi) var(--lo); width: calc(100% - 6px); }
   .status { padding: 2px 6px; border-top: 1px solid var(--lo); color: #333; display: flex; justify-content: space-between; }
@@ -83,6 +86,8 @@
     if (l.kind === 'join') row.append(span('join', '*** ' + l.nick + ' has joined ' + channel));
     else if (l.kind === 'topic') row.append(span('topicline', '*** ' + l.nick + " changes topic to '" + l.text + "'"));
     else if (l.kind === 'action') row.append(span('action', '* ' + l.nick + ' ' + l.text));
+    else if (l.kind === 'ask') row.append(span('ask', '?? <' + l.nick + '> asks #' + l.id + ': ' + l.text));
+    else if (l.kind === 'approve' || l.kind === 'deny') row.append(span(l.kind, '!! ' + l.nick + (l.kind === 'approve' ? ' approved' : ' denied') + ' ask #' + l.ref + (l.text ? ': ' + l.text : '')));
     else { row.append('<', span('', l.nick, nickColor(l.nick)), '> ', l.text); }
     $('log').append(row);
   }

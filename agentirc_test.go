@@ -18,6 +18,9 @@ type rig struct {
 	store  *Store
 	tokens map[string]string // nick -> token
 	dir    string
+	// session holds each nick's Mcp-Session-Id once it has initialized,
+	// and is sent back on every later request, as a real client does.
+	session map[string]string
 }
 
 func newRig(t *testing.T, nicks ...string) *rig {
@@ -63,12 +66,21 @@ func (r *rig) rpc(nick, method string, params any) (int, map[string]any) {
 	req.Header.Set("Content-Type", "application/json")
 	if nick != "" {
 		req.Header.Set("Authorization", "Bearer "+r.tokens[nick])
+		if id := r.session[nick]; id != "" {
+			req.Header.Set("Mcp-Session-Id", id)
+		}
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		r.t.Fatal(err)
 	}
 	defer resp.Body.Close()
+	if id := resp.Header.Get("Mcp-Session-Id"); id != "" && nick != "" {
+		if r.session == nil {
+			r.session = map[string]string{}
+		}
+		r.session[nick] = id
+	}
 	var out map[string]any
 	_ = json.NewDecoder(resp.Body).Decode(&out)
 	return resp.StatusCode, out

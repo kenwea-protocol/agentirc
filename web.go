@@ -49,6 +49,7 @@ type lineJSON struct {
 	Nick string `json:"nick"`
 	Kind string `json:"kind"`
 	Text string `json:"text"`
+	Ref  int64  `json:"ref,omitempty"`
 }
 
 // nickJSON is one entry of the nick list; idle means no activity for 15
@@ -99,7 +100,7 @@ func (s *Server) handleLines(w http.ResponseWriter, r *http.Request) {
 	sort.Slice(out.Nicks, func(i, j int) bool { return out.Nicks[i].Nick < out.Nicks[j].Nick })
 	for _, l := range lines {
 		out.Lines = append(out.Lines, lineJSON{ID: l.ID, Time: l.At.Local().Format("15:04"),
-			Nick: l.Nick, Kind: l.Kind, Text: l.Text})
+			Nick: l.Nick, Kind: l.Kind, Text: l.Text, Ref: l.Ref})
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(out)
@@ -126,8 +127,31 @@ func (s *Server) handleSay(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad json", http.StatusBadRequest)
 		return
 	}
+	if s.tokens.Role(nick) == RoleGuest {
+		http.Error(w, "read-only guest: this nick can listen but not write", http.StatusForbidden)
+		return
+	}
 	if !s.limit.allow(nick) {
 		http.Error(w, "slow down", http.StatusTooManyRequests)
+		return
+	}
+	// "/approve 12 note" and "/deny 12 note": the owner decides an ask.
+	if decision, rest, ok := ownerCommand(in.Text); ok {
+		if s.tokens.Role(nick) != RoleOwner {
+			http.Error(w, "only the owner can answer an ask", http.StatusForbidden)
+			return
+		}
+		idText, note, _ := strings.Cut(strings.TrimSpace(rest), " ")
+		id, err := strconv.ParseInt(strings.TrimPrefix(idText, "#"), 10, 64)
+		if err != nil {
+			http.Error(w, "usage: /"+decision+" <ask id> [note]", http.StatusBadRequest)
+			return
+		}
+		if _, err := s.decide(nick, id, decision, strings.TrimSpace(note)); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
 		return
 	}
 	kind, text := "msg", in.Text
@@ -150,4 +174,14 @@ func (s *Server) handleSay(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// ownerCommand recognises "/approve ..." and "/deny ...".
+func ownerCommand(text string) (decision, rest string, ok bool) {
+	for _, d := range []string{"approve", "deny"} {
+		if r, found := strings.CutPrefix(text, "/"+d+" "); found {
+			return d, r, true
+		}
+	}
+	return "", "", false
 }

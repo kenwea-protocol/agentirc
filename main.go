@@ -26,10 +26,11 @@ import (
 
 // Server ties the store, the tokens and per-nick read positions together.
 type Server struct {
-	store  *Store
-	tokens *Tokens
-	limit  *limiter
-	claims *claimBook // claims.go
+	store    *Store
+	tokens   *Tokens
+	limit    *limiter
+	claims   *claimBook   // claims.go
+	sessions *sessionBook // sessions.go
 
 	mu      sync.Mutex
 	cursors map[string]int64 // nick+channel -> last line id seen
@@ -38,8 +39,9 @@ type Server struct {
 
 func NewServer(store *Store, tokens *Tokens) *Server {
 	return &Server{store: store, tokens: tokens, limit: newLimiter(20, 3*time.Second),
-		claims:  openClaims(store.dir),
-		cursors: map[string]int64{}, joined: map[string]bool{}}
+		claims:   openClaims(store.dir),
+		sessions: newSessionBook(),
+		cursors:  map[string]int64{}, joined: map[string]bool{}}
 }
 
 func (s *Server) cursor(nick, channel string) int64 {
