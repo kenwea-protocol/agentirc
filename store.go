@@ -35,6 +35,8 @@ func (l Line) String() string {
 		return fmt.Sprintf("[%s] * %s %s", ts, l.Nick, l.Text)
 	case "topic":
 		return fmt.Sprintf("[%s] *** %s changes topic to '%s'", ts, l.Nick, l.Text)
+	case "notice":
+		return fmt.Sprintf("[%s] -%s:%s- %s", ts, l.Nick, l.Channel, l.Text)
 	case "join":
 		return fmt.Sprintf("[%s] *** %s has joined %s", ts, l.Nick, l.Channel)
 	case "ask":

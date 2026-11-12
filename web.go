@@ -79,6 +79,10 @@ func (s *Server) handleLines(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	if err := s.channels.MayEnter(nick, channel); err != nil {
+		http.Error(w, err.Error(), http.StatusForbidden)
+		return
+	}
 	after, _ := strconv.ParseInt(r.URL.Query().Get("after"), 10, 64)
 	var lines []Line
 	if after == 0 {
@@ -92,7 +96,7 @@ func (s *Server) handleLines(w http.ResponseWriter, r *http.Request) {
 	}
 	s.store.Touch(nick)
 	out := linesJSON{Me: nick, Channel: channel, Topic: s.store.Topic(channel),
-		Channels: s.store.Channels(), Lines: []lineJSON{}}
+		Channels: s.visibleChannels(nick), Lines: []lineJSON{}}
 	sort.Strings(out.Channels)
 	for n, at := range s.store.Seen() {
 		out.Nicks = append(out.Nicks, nickJSON{Nick: n, Idle: time.Since(at) > 15*time.Minute})
@@ -162,8 +166,18 @@ func (s *Server) handleSay(w http.ResponseWriter, r *http.Request) {
 	}
 	channel, err := NormalizeChannel(in.Channel)
 	if err == nil {
+		err = s.channels.MayEnter(nick, channel)
+	}
+	if err == nil && kind == "topic" && s.channels.TopicLocked(nick, channel) {
+		err = errNotOp
+	}
+	if err == nil {
 		s.ensureJoined(channel, nick)
 		_, err = s.store.Post(channel, nick, kind, text)
+	}
+	if errors.Is(err, errPrivateChannel) || errors.Is(err, errBanned) || errors.Is(err, errNotOp) {
+		http.Error(w, err.Error(), http.StatusForbidden)
+		return
 	}
 	if errors.Is(err, ErrBadInput) {
 		http.Error(w, err.Error(), http.StatusBadRequest)

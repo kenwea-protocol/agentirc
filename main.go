@@ -32,6 +32,7 @@ type Server struct {
 	claims   *claimBook   // claims.go
 	sessions *sessionBook // sessions.go
 	accounts *accountBook // accounts.go
+	channels *channelBook // channels.go
 
 	mu      sync.Mutex
 	cursors map[string]int64 // nick+channel -> last line id seen
@@ -43,6 +44,7 @@ func NewServer(store *Store, tokens *Tokens) *Server {
 		claims:   openClaims(store.dir),
 		sessions: newSessionBook(),
 		accounts: openAccounts(store.dir, tokens),
+		channels: openChannels(store.dir),
 		cursors:  map[string]int64{}, joined: map[string]bool{}}
 }
 

@@ -187,6 +187,12 @@ func (s *Server) callTool(ctx context.Context, nick string, params json.RawMessa
 	if err := s.guardWrite(nick, p.Name, params); err != nil {
 		return "", err
 	}
+	if err := s.guardChannel(nick, p.Name, params); err != nil {
+		return "", err
+	}
+	if text, handled, err := s.callChannelTool(ctx, nick, p.Name, params); handled {
+		return text, err
+	}
 	if text, handled, err := s.callApprovalTool(ctx, nick, p.Name, params); handled {
 		return text, err
 	}
@@ -248,7 +254,7 @@ func (s *Server) callTool(ctx context.Context, nick string, params json.RawMessa
 		s.setCursor(nick, channel, lines[len(lines)-1].ID)
 		return render(lines), nil
 	case "who":
-		return s.who(), nil
+		return s.who(nick), nil
 	case "topic":
 		if strings.TrimSpace(a.Text) == "" {
 			if t := s.store.Topic(channel); t != "" {
@@ -276,7 +282,7 @@ func render(lines []Line) string {
 	return b.String()
 }
 
-func (s *Server) who() string {
+func (s *Server) who(nick string) string {
 	seen := s.store.Seen()
 	nicks := make([]string, 0, len(seen))
 	for n := range seen {
@@ -288,7 +294,7 @@ func (s *Server) who() string {
 	for _, n := range nicks {
 		fmt.Fprintf(&b, "\n  %s  last active %s ago", n, time.Since(seen[n]).Round(time.Second))
 	}
-	chans := s.store.Channels()
+	chans := s.visibleChannels(nick)
 	sort.Strings(chans)
 	b.WriteString("\nChannels:")
 	for _, c := range chans {
