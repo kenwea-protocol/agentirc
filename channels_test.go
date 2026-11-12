@@ -35,6 +35,10 @@ func TestRegisteredChannelOpsAndNotice(t *testing.T) {
 	if _, isErr = r.call("mac", "topic", map[string]any{"channel": "#dev", "text": "release week"}); isErr {
 		t.Fatal("op could not set topic")
 	}
+	// The founder can hand the channel over; mac cannot take it.
+	if _, isErr = r.call("mac", "transfer", map[string]any{"channel": "#dev", "nick": "mac"}); !isErr {
+		t.Fatal("an op took the founder role")
+	}
 	// The founder cannot be deopped.
 	if _, isErr = r.call("mac", "deop", map[string]any{"channel": "#dev", "nick": "win"}); !isErr {
 		t.Fatal("founder deopped")

@@ -63,6 +63,8 @@ func commandTool(channel, text string) (string, map[string]any, error) {
 		return needNick("deop")
 	case "/mod":
 		return needNick("mod")
+	case "/transfer":
+		return needNick("transfer")
 	case "/demod":
 		return needNick("demod")
 	case "/ban":

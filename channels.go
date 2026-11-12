@@ -253,6 +253,20 @@ func (b *channelBook) Op(actor, channel, nick string) error {
 	})
 }
 
+// Transfer makes nick the founder. The founder, or a server admin and above.
+func (b *channelBook) Transfer(actor, channel, nick string) error {
+	return b.change(actor, channel, func(c *channelInfo, n string) bool {
+		return c.Founder == n || b.rank(n) >= roleRank["admin"]
+	}, func(c *channelInfo) error {
+		c.Founder = nick
+		if !c.isOp(nick) {
+			c.Ops = append(c.Ops, nick)
+		}
+		c.Banned = slices.DeleteFunc(c.Banned, func(n string) bool { return n == nick })
+		return nil
+	})
+}
+
 func (b *channelBook) Mod(actor, channel, nick string) error {
 	return b.opChange(actor, channel, func(c *channelInfo) error {
 		if !slices.Contains(c.Mods, nick) {
@@ -393,6 +407,8 @@ var channelTools = []map[string]any{
 		"inputSchema": schema(map[string]any{"channel": channelProp, "text": map[string]any{"type": "string"}}, "channel", "text")},
 	{"name": "op", "description": "Make a nick an operator of a registered channel. Operators only.",
 		"inputSchema": schema(map[string]any{"channel": channelProp, "nick": map[string]any{"type": "string"}}, "channel", "nick")},
+	{"name": "transfer", "description": "Hand a registered channel to another nick as its founder (~). The founder, or a server admin and above.",
+		"inputSchema": schema(map[string]any{"channel": channelProp, "nick": map[string]any{"type": "string"}}, "channel", "nick")},
 	{"name": "mod", "description": "Make a nick a moderator (%) of a registered channel: topic, notice, ban. Operators only.",
 		"inputSchema": schema(map[string]any{"channel": channelProp, "nick": map[string]any{"type": "string"}}, "channel", "nick")},
 	{"name": "demod", "description": "Take moderator (%) status from a nick. Operators only.",
@@ -410,7 +426,7 @@ var channelTools = []map[string]any{
 func init() { tools = append(tools, channelTools...) }
 
 // channelTools that change something; refused for guests.
-var channelWrites = map[string]bool{"register_channel": true, "notice": true, "op": true, "deop": true, "mod": true, "demod": true,
+var channelWrites = map[string]bool{"transfer": true, "register_channel": true, "notice": true, "op": true, "deop": true, "mod": true, "demod": true,
 	"ban": true, "unban": true, "set_key": true}
 
 // guardChannel refuses a tool in a channel the nick may not enter, and a
@@ -463,7 +479,7 @@ func (s *Server) callChannelTool(_ context.Context, nick, name string, params js
 		return "", true, err
 	}
 	target := strings.ToLower(strings.TrimSpace(a.Nick))
-	if (name == "op" || name == "deop" || name == "mod" || name == "demod" || name == "ban" || name == "unban") && !nickName.MatchString(target) {
+	if (name == "transfer" || name == "op" || name == "deop" || name == "mod" || name == "demod" || name == "ban" || name == "unban") && !nickName.MatchString(target) {
 		return "", true, fmt.Errorf("%w: name a nick", ErrBadInput)
 	}
 	if channelWrites[name] && !s.limit.allow(nick) {
@@ -513,6 +529,11 @@ func (s *Server) callChannelTool(_ context.Context, nick, name string, params js
 			return "", true, err
 		}
 		return announce("gives operator status to " + target)
+	case "transfer":
+		if err := s.channels.Transfer(nick, channel, target); err != nil {
+			return "", true, err
+		}
+		return announce("hands " + channel + " to " + target + " as founder")
 	case "mod":
 		if err := s.channels.Mod(nick, channel, target); err != nil {
 			return "", true, err
