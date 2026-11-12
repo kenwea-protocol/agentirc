@@ -190,6 +190,12 @@ func (s *Server) callTool(ctx context.Context, nick string, params json.RawMessa
 	if err := s.guardChannel(nick, p.Name, params); err != nil {
 		return "", err
 	}
+	if err := s.guardCost(nick, p.Name, params); err != nil {
+		return "", err
+	}
+	if text, handled, err := s.callCostTool(ctx, nick, p.Name, params); handled {
+		return text, err
+	}
 	if text, handled, err := s.callChannelTool(ctx, nick, p.Name, params); handled {
 		return text, err
 	}

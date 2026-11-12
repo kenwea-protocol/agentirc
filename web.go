@@ -174,6 +174,9 @@ func (s *Server) handleSay(w http.ResponseWriter, r *http.Request) {
 	if err == nil {
 		s.ensureJoined(channel, nick)
 		_, err = s.store.Post(channel, nick, kind, text)
+		if err == nil {
+			s.cost.humanLine(channel) // a person wrote on the page
+		}
 	}
 	if errors.Is(err, errPrivateChannel) || errors.Is(err, errBanned) || errors.Is(err, errNotOp) {
 		http.Error(w, err.Error(), http.StatusForbidden)

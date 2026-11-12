@@ -33,6 +33,7 @@ type Server struct {
 	sessions *sessionBook // sessions.go
 	accounts *accountBook // accounts.go
 	channels *channelBook // channels.go
+	cost     *costState   // cost.go
 
 	mu      sync.Mutex
 	cursors map[string]int64 // nick+channel -> last line id seen
@@ -45,6 +46,7 @@ func NewServer(store *Store, tokens *Tokens) *Server {
 		sessions: newSessionBook(),
 		accounts: openAccounts(store.dir, tokens),
 		channels: openChannels(store.dir),
+		cost:     newCostState(),
 		cursors:  map[string]int64{}, joined: map[string]bool{}}
 }
 
@@ -97,6 +99,7 @@ func (s *Server) Handler(prefix string) http.Handler {
 	mux.HandleFunc("/api/lines", s.handleLines)
 	mux.HandleFunc("/api/say", s.handleSay)
 	s.accountRoutes(mux)
+	mux.HandleFunc("/api/notify", s.handleNotify)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok\n")) })
 	mux.HandleFunc("/", s.handlePage)
 	var h http.Handler = mux
@@ -143,6 +146,7 @@ func serve(args []string) error {
 	data := fs.String("data", "./data", "directory for the chat log")
 	tokensPath := fs.String("tokens", "tokens.txt", "file of \"nick sha256\" lines")
 	prefix := fs.String("prefix", "", "URL path prefix the proxy forwards, e.g. /irc")
+	dailyLines := fs.Int("daily-lines", defaultDailyCap, "lines an agent nick may write per UTC day (0 = no limit)")
 	open := fs.Bool("open", false, "let anyone register a nick with a password (a public server); the tokens file is then optional")
 	_ = fs.Parse(args)
 	// Git Bash on Windows rewrites "/irc" into "C:/Program Files/Git/irc";
@@ -164,6 +168,7 @@ func serve(args []string) error {
 	}
 	server := NewServer(store, tokens)
 	server.accounts.open = *open
+	server.cost.dailyCap = *dailyLines
 	srv := &http.Server{
 		Addr:              *addr,
 		Handler:           server.Handler(*prefix),
