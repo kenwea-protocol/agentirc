@@ -166,6 +166,9 @@ func (s *Server) callTool(ctx context.Context, nick string, params json.RawMessa
 	if err := json.Unmarshal(params, &p); err != nil {
 		return "", errors.New("bad arguments")
 	}
+	if text, handled, err := s.callClaimTool(ctx, nick, p.Name, params); handled {
+		return text, err
+	}
 	a := p.Arguments
 	channel, err := NormalizeChannel(a.Channel)
 	if err != nil && p.Name != "who" {

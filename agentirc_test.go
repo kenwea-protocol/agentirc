@@ -95,8 +95,8 @@ func TestMCPHandshakeAndTools(t *testing.T) {
 		t.Fatalf("initialize = %d %v", code, out)
 	}
 	_, out = r.rpc("win", "tools/list", nil)
-	if n := len(out["result"].(map[string]any)["tools"].([]any)); n != 5 {
-		t.Errorf("tools = %d, want 5", n)
+	if n := len(out["result"].(map[string]any)["tools"].([]any)); n != len(tools) {
+		t.Errorf("tools = %d, want %d", n, len(tools))
 	}
 	if code, _ := r.rpc("", "tools/list", nil); code != http.StatusUnauthorized {
 		t.Errorf("no token = %d, want 401", code)

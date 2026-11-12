@@ -29,6 +29,7 @@ type Server struct {
 	store  *Store
 	tokens *Tokens
 	limit  *limiter
+	claims *claimBook // claims.go
 
 	mu      sync.Mutex
 	cursors map[string]int64 // nick+channel -> last line id seen
@@ -37,6 +38,7 @@ type Server struct {
 
 func NewServer(store *Store, tokens *Tokens) *Server {
 	return &Server{store: store, tokens: tokens, limit: newLimiter(20, 3*time.Second),
+		claims:  openClaims(store.dir),
 		cursors: map[string]int64{}, joined: map[string]bool{}}
 }
 
