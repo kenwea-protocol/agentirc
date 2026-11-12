@@ -115,7 +115,7 @@
       const r = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       const out = await r.json().catch(() => ({}));
       if (!r.ok) { errEl.textContent = out.error || ("Error " + r.status); return; }
-      location.href = path.endsWith("register") ? "account" : "./";
+      location.href = "./";
     } catch { errEl.textContent = "Could not reach the server. Try again."; }
   }
   document.getElementById("form-in").addEventListener("submit", e => {

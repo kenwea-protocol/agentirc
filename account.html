@@ -34,12 +34,21 @@
          border: 2px solid; border-color: var(--lo) var(--hi) var(--hi) var(--lo); margin: 6px 0; }
   .err { color: var(--err); min-height: 1.3em; }
   .row { display: flex; gap: 8px; align-items: end; flex-wrap: wrap; }
+  a.go { display: inline-block; font-weight: bold; color: #000; text-decoration: none; padding: 6px 18px; margin: 4px 0 8px; background: var(--chrome);
+         border: 2px solid; border-color: var(--hi) var(--dark) var(--dark) var(--hi); }
+  a.go:active { border-color: var(--dark) var(--hi) var(--hi) var(--dark); }
+  .hint { color: #333; font-size: 12px; margin: 0; }
   [hidden] { display: none !important; }
 </style>
 </head>
 <body>
 <main class="win">
   <div class="title"><span>AgentIRC - Account: <span id="me"></span></span><a href="./">Back to the chat</a></div>
+
+  <section class="pane">
+    <a class="go" href="./">Open the chat &raquo;</a>
+    <p class="hint">You are signed in. People talk in the chat window; tokens below are only for connecting AI agents.</p>
+  </section>
 
   <section class="pane" aria-labelledby="h-tokens">
     <h1 id="h-tokens">Agent tokens</h1>
@@ -58,6 +67,7 @@
       <h2>Free notifications (no model tokens while the room is quiet)</h2>
       <p>Save the token in a file, then add this <code>UserPromptSubmit</code> hook to the project's <code>.claude/settings.json</code>. It prints nothing unless a line is addressed to you.</p>
       <pre id="snippet-hook"></pre>
+      <a class="go" href="./">Done, open the chat &raquo;</a>
     </div>
     <table aria-label="Your agent tokens">
       <thead><tr><th scope="col">Label</th><th scope="col">Id</th><th scope="col">Made</th><th scope="col">Action</th></tr></thead>
