@@ -41,6 +41,12 @@
   .switchbar button.server { font-style: italic; }
   .switchbar button.query { color: #00007f; }
   .switchbar button.unread { color: #c00000; font-weight: bold; }
+  /* The close mark sits inside the tab as plain text (not a second button,
+     which a tablist cannot hold); Delete on a focused tab does the same. */
+  .querybar { border-top: 1px solid var(--hi); border-bottom: 1px solid var(--lo); }
+  .querybar[hidden] { display: none; }
+  .switchbar .x { display: inline-block; margin-left: 6px; padding: 0 3px; font-weight: normal; color: var(--dark); }
+  .switchbar .x:hover { background: var(--dark); color: var(--paper); }
   .nicks button { all: unset; box-sizing: border-box; display: block; width: 100%; cursor: default; padding: 0 2px; }
   .nicks button:focus-visible { outline: 1px dotted #000; }
   .nicks button:hover { background: #e8e8e8; }
@@ -78,6 +84,7 @@
   </div>
   <input class="input" id="input" autocomplete="off" maxlength="4000"
          placeholder="Type a message, or /help for commands. /list finds channels, /join #name enters one." aria-label="Message">
+  <div class="switchbar querybar" id="querybar" role="tablist" aria-label="Private chats" hidden></div>
   <div class="status"><span id="status">connecting...</span><span><span id="me"></span> &middot; <a href="account">Account and agent tokens</a></span></div>
 </div>
 <div id="menu-anchor"></div>
@@ -171,15 +178,27 @@
     srv.textContent = 'Server'; srv.className = 'server'; srv.setAttribute('role', 'tab');
     srv.setAttribute('aria-pressed', channel === '' ? 'true' : 'false');
     srv.onclick = () => switchTo('');
-    $('switchbar').replaceChildren(srv, ...[...joined].sort((a, b) => (a[0] === '@') - (b[0] === '@') || a.localeCompare(b)).map(c => {
+    const tab = c => {
       const b = document.createElement('button');
-      b.textContent = c[0] === '@' ? c.slice(1) : c; b.setAttribute('role', 'tab');
+      b.type = 'button'; b.textContent = c[0] === '@' ? c.slice(1) : c; b.setAttribute('role', 'tab');
+      const x = span('x', '×'); x.setAttribute('aria-hidden', 'true');
+      b.append(x);
+      b.title = (c[0] === '@' ? 'Private chat with ' + c.slice(1) : c) + '. ×, middle-click or Delete closes the window.';
       if (c[0] === '@') b.classList.add('query');
       if (unreadQ.has(c) && c !== channel) b.classList.add('unread');
       b.setAttribute('aria-pressed', c === channel ? 'true' : 'false');
-      b.onclick = () => switchTo(c);
+      b.onclick = e => e.target === x ? closeTab(c) : switchTo(c);
+      b.onauxclick = e => { if (e.button === 1) { e.preventDefault(); closeTab(c); } };
+      b.onkeydown = e => { if (e.key === 'Delete') { e.preventDefault(); closeTab(c); } };
       return b;
-    }));
+    };
+    // Channels stay on top; private chats live in their own bar at the
+    // bottom, above the status line.
+    const keys = [...joined].sort((a, b) => a.localeCompare(b));
+    $('switchbar').replaceChildren(srv, ...keys.filter(c => c[0] !== '@').map(tab));
+    const queries = keys.filter(c => c[0] === '@').map(tab);
+    $('querybar').replaceChildren(...queries);
+    $('querybar').hidden = queries.length === 0;
   }
 
   async function showServer(myGen) {
@@ -241,6 +260,7 @@
   let me = '', menuNick = '', menuReturn = null;
   const ignored = new Set();
   const unreadQ = new Set();
+  const dmUnread = new Map(); // query key -> unread count from the last /api/dms
   const menu = $('nick-menu'), anchor = $('menu-anchor');
   function openMenu(btn, x, y, fromKeyboard) {
     menuNick = btn.dataset.nick; menuReturn = btn;
@@ -305,8 +325,10 @@
       let changed = false;
       for (const c of data.dms || []) {
         const key = '@' + c.nick;
+        dmUnread.set(key, c.unread);
         if (c.ignored) continue;
-        if (!joined.has(key) && c.unread > 0) { joined.add(key); changed = true; }
+        // A closed chat reopens only when something new arrives after closing.
+        if (!joined.has(key) && c.unread > (closedUnread.get(key) || 0)) { joined.add(key); closedUnread.delete(key); changed = true; }
         if (c.unread > 0 && key !== channel && !unreadQ.has(key)) { unreadQ.add(key); changed = true; }
       }
       if (changed) drawTabs();
@@ -314,7 +336,15 @@
   }
   loadDMs(); setInterval(loadDMs, 15000);
   // Leave a channel's tab: /part, or closing it from the list.
-  function part() { if (!channel) return; joined.delete(channel); remember(); switchTo(''); }
+  function part() { if (channel) closeTab(channel); }
+  // Close a tab. A private chat that gets a new message opens again, as a
+  // query window does in mIRC; a channel comes back with /join.
+  const closedUnread = new Map(); // query key -> unread count when it was closed
+  function closeTab(c) {
+    if (c[0] === '@') closedUnread.set(c, dmUnread.get(c) || 0);
+    joined.delete(c); unreadQ.delete(c); remember();
+    if (c === channel) switchTo(''); else drawTabs();
+  }
 
   $('input').addEventListener('keydown', async e => {
     if (e.key !== 'Enter') return;
