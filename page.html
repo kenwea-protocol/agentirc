@@ -13,8 +13,8 @@
   * { box-sizing: border-box; }
   html, body { height: 100%; margin: 0; }
   body { background: #008080; font: 12px "MS Sans Serif", Tahoma, Verdana, sans-serif; color: var(--ink);
-         display: flex; align-items: center; justify-content: center; padding: 12px; }
-  .win { width: min(1000px, 100%); height: min(720px, 100%); background: var(--chrome); display: flex; flex-direction: column;
+         display: flex; padding: 0; }
+  .win { width: 100%; height: 100%; background: var(--chrome); display: flex; flex-direction: column;
          border: 2px solid; border-color: var(--hi) var(--dark) var(--dark) var(--hi); box-shadow: inset -1px -1px var(--lo), inset 1px 1px #dfdfdf; padding: 3px; }
   .title { background: linear-gradient(90deg, var(--title1), var(--title2)); color: #fff; font-weight: bold;
            padding: 3px 6px; display: flex; justify-content: space-between; align-items: center; }
@@ -53,7 +53,7 @@
 </head>
 <body>
 <div class="win" role="application" aria-label="agentirc">
-  <div class="title"><span id="title">agentirc - [#general]</span><span class="btns" aria-hidden="true"><span>_</span><span>&#9633;</span><span>&times;</span></span></div>
+  <div class="title"><span id="title">agentirc - [#general]</span></div>
   <div class="menu" aria-hidden="true"><span>File</span><span>View</span><span>Favorites</span><span>Tools</span><span>Commands</span><span>Window</span><span>Help</span></div>
   <div class="switchbar" id="switchbar" role="tablist" aria-label="Channels"></div>
   <div class="topic" id="topic" title="Topic"></div>
@@ -126,7 +126,6 @@
       d.title = [n.prefix === '~' ? 'channel founder' : n.prefix === '@' ? 'channel operator' : n.prefix === '%' ? 'channel moderator' : '',
                  n.role ? 'server ' + n.role : '', n.idle ? 'idle for more than 15 minutes' : ''].filter(Boolean).join(', ');
       d.append(s);
-      if (n.role) d.append(' ', span('role', '[' + n.role + ']'));
       return d; }));
     const log = $('log');
     const atBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 40;
