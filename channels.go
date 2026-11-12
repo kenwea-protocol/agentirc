@@ -29,6 +29,7 @@ import (
 type channelInfo struct {
 	Founder string    `json:"founder"`
 	Ops     []string  `json:"ops"`
+	Mods    []string  `json:"mods,omitempty"` // channel moderators (%)
 	Banned  []string  `json:"banned,omitempty"`
 	KeySalt string    `json:"keySalt,omitempty"`
 	KeyHash string    `json:"keyHash,omitempty"`
@@ -51,6 +52,27 @@ type channelBook struct {
 	file   string
 	byName map[string]*channelInfo
 	now    func() time.Time
+	// staffRank gives a nick's server role rank (server.go); moderators and
+	// above moderate every registered channel, admins and above also op.
+	staffRank func(nick string) int
+}
+
+func (b *channelBook) rank(nick string) int {
+	if b.staffRank == nil {
+		return 0
+	}
+	return b.staffRank(nick)
+}
+
+// canOp: may give and take @ and %. Channel ops, and server admins and above.
+func (b *channelBook) canOp(c *channelInfo, nick string) bool {
+	return c.isOp(nick) || b.rank(nick) >= roleRank["admin"]
+}
+
+// canModerate: may set the topic, send a notice, ban. Adds channel
+// moderators (%) and server moderators.
+func (b *channelBook) canModerate(c *channelInfo, nick string) bool {
+	return b.canOp(c, nick) || slices.Contains(c.Mods, nick) || b.rank(nick) >= roleRank["moderator"]
 }
 
 const (
@@ -111,20 +133,70 @@ func (b *channelBook) MayEnter(nick, channel string) error {
 // Visible reports whether channel shows in nick's channel lists.
 func (b *channelBook) Visible(nick, channel string) bool { return b.MayEnter(nick, channel) == nil }
 
-// IsOp reports whether nick is an operator of channel (used by the page for @).
-func (b *channelBook) IsOp(nick, channel string) bool {
+// CanModerate reports whether nick may send a notice in channel.
+func (b *channelBook) CanModerate(nick, channel string) bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	c, ok := b.byName[channel]
-	return ok && c.isOp(nick)
+	return ok && b.canModerate(c, nick)
 }
 
-// TopicLocked reports whether only operators may set channel's topic.
+// TopicLocked reports whether nick may not set channel's topic.
 func (b *channelBook) TopicLocked(nick, channel string) bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	c, ok := b.byName[channel]
-	return ok && !c.isOp(nick)
+	return ok && !b.canModerate(c, nick)
+}
+
+// Prefix is the nick-list mark in channel: ~ founder, @ op, % moderator.
+func (b *channelBook) Prefix(nick, channel string) string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	c, ok := b.byName[channel]
+	switch {
+	case !ok:
+		return ""
+	case c.Founder == nick:
+		return "~"
+	case c.isOp(nick):
+		return "@"
+	case slices.Contains(c.Mods, nick):
+		return "%"
+	}
+	return ""
+}
+
+func (b *channelBook) founderAndPrivate(channel string) (string, bool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if c, ok := b.byName[channel]; ok {
+		return c.Founder, c.private()
+	}
+	return "", false
+}
+
+// RolesOf lists nick's channel marks ("~#dev", "@#general") in channels the
+// asker can see.
+func (b *channelBook) RolesOf(nick, asker string) []string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	var out []string
+	for name, c := range b.byName {
+		if !c.mayEnter(asker) {
+			continue
+		}
+		switch {
+		case c.Founder == nick:
+			out = append(out, "~"+name)
+		case c.isOp(nick):
+			out = append(out, "@"+name)
+		case slices.Contains(c.Mods, nick):
+			out = append(out, "%"+name)
+		}
+	}
+	slices.Sort(out)
+	return out
 }
 
 func (b *channelBook) Register(nick, channel string) error {
@@ -148,13 +220,22 @@ func (b *channelBook) Register(nick, channel string) error {
 
 // opChange runs f on a registered channel when actor is an operator.
 func (b *channelBook) opChange(actor, channel string, f func(c *channelInfo) error) error {
+	return b.change(actor, channel, b.canOp, f)
+}
+
+// modChange runs f when actor may moderate the channel.
+func (b *channelBook) modChange(actor, channel string, f func(c *channelInfo) error) error {
+	return b.change(actor, channel, b.canModerate, f)
+}
+
+func (b *channelBook) change(actor, channel string, may func(*channelInfo, string) bool, f func(c *channelInfo) error) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	c, ok := b.byName[channel]
 	if !ok {
 		return errNotRegistered
 	}
-	if !c.isOp(actor) {
+	if !may(c, actor) {
 		return errNotOp
 	}
 	if err := f(c); err != nil {
@@ -172,6 +253,22 @@ func (b *channelBook) Op(actor, channel, nick string) error {
 	})
 }
 
+func (b *channelBook) Mod(actor, channel, nick string) error {
+	return b.opChange(actor, channel, func(c *channelInfo) error {
+		if !slices.Contains(c.Mods, nick) {
+			c.Mods = append(c.Mods, nick)
+		}
+		return nil
+	})
+}
+
+func (b *channelBook) Demod(actor, channel, nick string) error {
+	return b.opChange(actor, channel, func(c *channelInfo) error {
+		c.Mods = slices.DeleteFunc(c.Mods, func(n string) bool { return n == nick })
+		return nil
+	})
+}
+
 func (b *channelBook) Deop(actor, channel, nick string) error {
 	return b.opChange(actor, channel, func(c *channelInfo) error {
 		if nick == c.Founder {
@@ -183,10 +280,17 @@ func (b *channelBook) Deop(actor, channel, nick string) error {
 }
 
 func (b *channelBook) Ban(actor, channel, nick string) error {
-	return b.opChange(actor, channel, func(c *channelInfo) error {
+	return b.modChange(actor, channel, func(c *channelInfo) error {
 		if nick == c.Founder || nick == actor {
 			return fmt.Errorf("%w: cannot ban the founder or yourself", ErrBadInput)
 		}
+		if b.rank(nick) > 0 && b.rank(nick) >= b.rank(actor) {
+			return fmt.Errorf("%w: cannot ban server staff at or above your own role", ErrBadInput)
+		}
+		if c.isOp(nick) && !b.canOp(c, actor) {
+			return fmt.Errorf("%w: a moderator cannot ban an operator", ErrBadInput)
+		}
+		c.Mods = slices.DeleteFunc(c.Mods, func(n string) bool { return n == nick })
 		c.Ops = slices.DeleteFunc(c.Ops, func(n string) bool { return n == nick })
 		c.Members = slices.DeleteFunc(c.Members, func(n string) bool { return n == nick })
 		if !slices.Contains(c.Banned, nick) {
@@ -197,7 +301,7 @@ func (b *channelBook) Ban(actor, channel, nick string) error {
 }
 
 func (b *channelBook) Unban(actor, channel, nick string) error {
-	return b.opChange(actor, channel, func(c *channelInfo) error {
+	return b.modChange(actor, channel, func(c *channelInfo) error {
 		c.Banned = slices.DeleteFunc(c.Banned, func(n string) bool { return n == nick })
 		return nil
 	})
@@ -210,7 +314,8 @@ func (b *channelBook) SetKey(actor, channel, key string) error {
 	if key != "" && len([]rune(key)) < minChannelKey {
 		return fmt.Errorf("%w: a channel key needs at least %d characters", ErrBadInput, minChannelKey)
 	}
-	return b.opChange(actor, channel, func(c *channelInfo) error {
+	// Only the channel's own operators: server staff do not hold private keys.
+	return b.change(actor, channel, func(c *channelInfo, n string) bool { return c.isOp(n) }, func(c *channelInfo) error {
 		c.Members = nil
 		if key == "" {
 			c.KeySalt, c.KeyHash = "", ""
@@ -263,8 +368,11 @@ func (b *channelBook) Info(nick, channel string) string {
 	if !ok {
 		return channel + " is not registered: anyone can talk in it, and register_channel makes you its founder."
 	}
-	s := fmt.Sprintf("%s: founder %s, operators @%s, registered %s", channel, c.Founder,
+	s := fmt.Sprintf("%s: founder ~%s, operators @%s, registered %s", channel, c.Founder,
 		strings.Join(c.Ops, " @"), c.Created.Format("2006-01-02"))
+	if len(c.Mods) > 0 {
+		s += ", moderators %" + strings.Join(c.Mods, " %")
+	}
 	if c.private() {
 		s += ", private (key needed to join)"
 	}
@@ -285,6 +393,10 @@ var channelTools = []map[string]any{
 		"inputSchema": schema(map[string]any{"channel": channelProp, "text": map[string]any{"type": "string"}}, "channel", "text")},
 	{"name": "op", "description": "Make a nick an operator of a registered channel. Operators only.",
 		"inputSchema": schema(map[string]any{"channel": channelProp, "nick": map[string]any{"type": "string"}}, "channel", "nick")},
+	{"name": "mod", "description": "Make a nick a moderator (%) of a registered channel: topic, notice, ban. Operators only.",
+		"inputSchema": schema(map[string]any{"channel": channelProp, "nick": map[string]any{"type": "string"}}, "channel", "nick")},
+	{"name": "demod", "description": "Take moderator (%) status from a nick. Operators only.",
+		"inputSchema": schema(map[string]any{"channel": channelProp, "nick": map[string]any{"type": "string"}}, "channel", "nick")},
 	{"name": "deop", "description": "Take operator status from a nick. Operators only; the founder stays an operator.",
 		"inputSchema": schema(map[string]any{"channel": channelProp, "nick": map[string]any{"type": "string"}}, "channel", "nick")},
 	{"name": "ban", "description": "Ban a nick from a registered channel: it can no longer read or write there. Operators only.",
@@ -298,7 +410,7 @@ var channelTools = []map[string]any{
 func init() { tools = append(tools, channelTools...) }
 
 // channelTools that change something; refused for guests.
-var channelWrites = map[string]bool{"register_channel": true, "notice": true, "op": true, "deop": true,
+var channelWrites = map[string]bool{"register_channel": true, "notice": true, "op": true, "deop": true, "mod": true, "demod": true,
 	"ban": true, "unban": true, "set_key": true}
 
 // guardChannel refuses a tool in a channel the nick may not enter, and a
@@ -351,7 +463,7 @@ func (s *Server) callChannelTool(_ context.Context, nick, name string, params js
 		return "", true, err
 	}
 	target := strings.ToLower(strings.TrimSpace(a.Nick))
-	if (name == "op" || name == "deop" || name == "ban" || name == "unban") && !nickName.MatchString(target) {
+	if (name == "op" || name == "deop" || name == "mod" || name == "demod" || name == "ban" || name == "unban") && !nickName.MatchString(target) {
 		return "", true, fmt.Errorf("%w: name a nick", ErrBadInput)
 	}
 	if channelWrites[name] && !s.limit.allow(nick) {
@@ -387,7 +499,7 @@ func (s *Server) callChannelTool(_ context.Context, nick, name string, params js
 		}
 		return announce("registers " + channel + " and is its founder")
 	case "notice":
-		if !s.channels.IsOp(nick, channel) {
+		if !s.channels.CanModerate(nick, channel) {
 			return "", true, errNotOp
 		}
 		s.ensureJoined(channel, nick)
@@ -401,6 +513,16 @@ func (s *Server) callChannelTool(_ context.Context, nick, name string, params js
 			return "", true, err
 		}
 		return announce("gives operator status to " + target)
+	case "mod":
+		if err := s.channels.Mod(nick, channel, target); err != nil {
+			return "", true, err
+		}
+		return announce("gives moderator status to " + target)
+	case "demod":
+		if err := s.channels.Demod(nick, channel, target); err != nil {
+			return "", true, err
+		}
+		return announce("takes moderator status from " + target)
 	case "deop":
 		if err := s.channels.Deop(nick, channel, target); err != nil {
 			return "", true, err

@@ -102,7 +102,7 @@ func mentionOf(nick string) *regexp.Regexp {
 
 // guardCost runs before a tool: say and notice by an agent count against the
 // run and the budget. The owner's lines reset the run instead.
-func (s *Server) guardCost(nick, tool string, params json.RawMessage) error {
+func (s *Server) guardCost(ctx context.Context, nick, tool string, params json.RawMessage) error {
 	if tool != "say" && tool != "notice" {
 		return nil
 	}
@@ -114,7 +114,7 @@ func (s *Server) guardCost(nick, tool string, params json.RawMessage) error {
 	if err != nil {
 		return nil
 	}
-	if s.tokens.Role(nick) == RoleOwner {
+	if s.tokens.Role(nick) == RoleOwner || fromPage(ctx) { // a person typed it
 		s.cost.humanLine(channel)
 		return nil
 	}

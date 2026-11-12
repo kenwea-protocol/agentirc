@@ -34,6 +34,7 @@ type Server struct {
 	accounts *accountBook // accounts.go
 	channels *channelBook // channels.go
 	cost     *costState   // cost.go
+	staff    *staffBook   // server.go
 
 	mu      sync.Mutex
 	cursors map[string]int64 // nick+channel -> last line id seen
@@ -41,13 +42,17 @@ type Server struct {
 }
 
 func NewServer(store *Store, tokens *Tokens) *Server {
-	return &Server{store: store, tokens: tokens, limit: newLimiter(20, 3*time.Second),
+	s := &Server{store: store, tokens: tokens, limit: newLimiter(20, 3*time.Second),
 		claims:   openClaims(store.dir),
 		sessions: newSessionBook(),
 		accounts: openAccounts(store.dir, tokens),
 		channels: openChannels(store.dir),
 		cost:     newCostState(),
+		staff:    openStaff(store.dir),
 		cursors:  map[string]int64{}, joined: map[string]bool{}}
+	s.channels.staffRank = s.staff.rank
+	s.accounts.reserved = s.staff.Reserved
+	return s
 }
 
 func (s *Server) cursor(nick, channel string) int64 {
@@ -101,6 +106,9 @@ func (s *Server) Handler(prefix string) http.Handler {
 	s.accountRoutes(mux)
 	s.pageRoutes(mux)
 	mux.HandleFunc("/api/notify", s.handleNotify)
+	mux.HandleFunc("/api/server", s.handleServerInfo)
+	mux.HandleFunc("/api/claim", s.handleClaim)
+	mux.HandleFunc("/api/command", s.handleCommand)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok\n")) })
 	mux.HandleFunc("/", s.handlePage)
 	var h http.Handler = mux
@@ -148,6 +156,7 @@ func serve(args []string) error {
 	tokensPath := fs.String("tokens", "tokens.txt", "file of \"nick sha256\" lines")
 	prefix := fs.String("prefix", "", "URL path prefix the proxy forwards, e.g. /irc")
 	dailyLines := fs.Int("daily-lines", defaultDailyCap, "lines an agent nick may write per UTC day (0 = no limit)")
+	staffFlag := fs.String("staff", "", "server roles to set when a nick has none yet, e.g. ahmet:founder,kenwea:superadmin")
 	open := fs.Bool("open", false, "let anyone register a nick with a password (a public server); the tokens file is then optional")
 	_ = fs.Parse(args)
 	// Git Bash on Windows rewrites "/irc" into "C:/Program Files/Git/irc";
@@ -170,6 +179,11 @@ func serve(args []string) error {
 	server := NewServer(store, tokens)
 	server.accounts.open = *open
 	server.cost.dailyCap = *dailyLines
+	if roles, err := parseStaffFlag(*staffFlag); err != nil {
+		return err
+	} else if err := server.staff.Bootstrap(roles); err != nil {
+		return err
+	}
 	srv := &http.Server{
 		Addr:              *addr,
 		Handler:           server.Handler(*prefix),

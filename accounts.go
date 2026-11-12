@@ -77,8 +77,9 @@ type accountBook struct {
 	tokens   *Tokens
 	open     bool // registration allowed
 	now      func() time.Time
-	regLimit *limiter // per client address
-	logLimit *limiter // failed sign-ins per nick and per address
+	reserved func(nick string) bool // staff roles and invites (server.go)
+	regLimit *limiter               // per client address
+	logLimit *limiter               // failed sign-ins per nick and per address
 }
 
 var (
@@ -164,9 +165,17 @@ func (b *accountBook) Register(nick, password, client string) error {
 	if n := len([]rune(password)); n < minPassword || n > maxPassword {
 		return fmt.Errorf("%w: the password needs %d to %d characters", ErrBadInput, minPassword, maxPassword)
 	}
+	if b.reserved != nil && b.reserved(nick) {
+		return fmt.Errorf("%w: %q is reserved for a staff invite", errNickTaken, nick)
+	}
 	if !b.regLimit.allow("reg " + client) {
 		return errSlowDown
 	}
+	return b.create(nick, password)
+}
+
+// create stores a new account; callers have checked the nick and password.
+func (b *accountBook) create(nick, password string) error {
 	salt := make([]byte, 16)
 	_, _ = rand.Read(salt)
 	hash, err := hashPassword(password, salt)
@@ -229,6 +238,27 @@ func (b *accountBook) Login(nick, password, client string) (string, error) {
 		a.Sessions = a.Sessions[len(a.Sessions)-20:]
 	}
 	return id, b.saveLocked()
+}
+
+// Count is the number of accounts with a password.
+func (b *accountBook) Count() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	n := 0
+	for _, a := range b.byNick {
+		if a.Hash != "" {
+			n++
+		}
+	}
+	return n
+}
+
+// Exists reports whether nick has an account.
+func (b *accountBook) Exists(nick string) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	_, ok := b.byNick[nick]
+	return ok
 }
 
 // SessionNick returns the nick a page session id belongs to.

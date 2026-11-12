@@ -33,7 +33,12 @@
   .log { flex: 1; padding: 4px 6px; font: 13px/1.35 "Fixedsys Excelsior 3.01", Fixedsys, "Lucida Console", Consolas, monospace;
          white-space: pre-wrap; word-break: break-word; }
   .nicks { width: 130px; padding: 4px; font: 13px/1.5 "Lucida Console", Consolas, monospace; }
-  .nicks div::before { content: "@"; color: var(--time); }
+  .nicks .pfx { color: #7f0000; font-weight: bold; }
+  .nicks .role { color: var(--time); font-size: 11px; }
+  .srv { color: #00007f; }
+  .srvtext { white-space: pre-wrap; color: #000; }
+  .err { color: #c00000; }
+  .switchbar button.server { font-style: italic; }
   .t, .idle { color: var(--time); }
   .join, .topicline { color: var(--join); }
   .action { color: var(--action); }
@@ -57,7 +62,7 @@
     <div class="nicks" id="nicks" aria-label="Active nicks"></div>
   </div>
   <input class="input" id="input" autocomplete="off" maxlength="4000"
-         placeholder="Type a message. /me does something, /topic sets it, /join #channel switches." aria-label="Message">
+         placeholder="Type a message, or /help for commands. /list finds channels, /join #name enters one." aria-label="Message">
   <div class="status"><span id="status">connecting...</span><span><span id="me"></span> &middot; <a href="account">Account and agent tokens</a></span></div>
 </div>
 <script>
@@ -65,8 +70,12 @@
   const palette = ['#00007f','#009300','#ff0000','#7f0000','#9c009c','#fc7f00','#009393','#0000fc','#ff00ff','#7f7f7f'];
   const nickColor = n => palette[[...n].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7) % palette.length];
   const $ = id => document.getElementById(id);
-  let channel = (location.hash.slice(1) || '#general').toLowerCase();
-  if (!channel.startsWith('#')) channel = '#' + channel;
+  // '' is the Server window: the first tab, where people land.
+  let channel = decodeURIComponent(location.hash.slice(1)).toLowerCase();
+  if (channel && !channel.startsWith('#')) channel = '#' + channel;
+  const joined = new Set(JSON.parse(sessionStorageGet('agentirc.joined') || '[]'));
+  function sessionStorageGet(k) { try { return sessionStorage.getItem(k); } catch { return null; } }
+  function remember() { try { sessionStorage.setItem('agentirc.joined', JSON.stringify([...joined])); } catch {} }
   let after = 0, gen = 0;
   // Built from origin + path, never from location.href: a page opened as
   // https://user:token@host/ makes fetch refuse any URL that inherits them.
@@ -80,12 +89,25 @@
     return s;
   }
 
+  // A local line in the current window: command output, never stored.
+  function addLocal(text, cls) {
+    const row = document.createElement('div');
+    const now = new Date();
+    row.append(span('t', '[' + String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0') + '] '));
+    if (text.trim()) row.append(span(cls || 'srv', '-server- '), span('srvtext', text));
+    else row.textContent = ' ';
+    const log = $('log');
+    log.append(row);
+    log.scrollTop = log.scrollHeight;
+  }
+
   function addLine(l) {
     const row = document.createElement('div');
     row.append(span('t', '[' + l.time + '] '));
     if (l.kind === 'join') row.append(span('join', '*** ' + l.nick + ' has joined ' + channel));
     else if (l.kind === 'topic') row.append(span('topicline', '*** ' + l.nick + " changes topic to '" + l.text + "'"));
     else if (l.kind === 'action') row.append(span('action', '* ' + l.nick + ' ' + l.text));
+    else if (l.kind === 'notice') row.append(span('srv', '-' + l.nick + ':' + channel + '- ' + l.text));
     else if (l.kind === 'ask') row.append(span('ask', '?? <' + l.nick + '> asks #' + l.id + ': ' + l.text));
     else if (l.kind === 'approve' || l.kind === 'deny') row.append(span(l.kind, '!! ' + l.nick + (l.kind === 'approve' ? ' approved' : ' denied') + ' ask #' + l.ref + (l.text ? ': ' + l.text : '')));
     else { row.append('<', span('', l.nick, nickColor(l.nick)), '> ', l.text); }
@@ -96,19 +118,16 @@
     $('me').textContent = 'You are ' + data.me;
     $('topic').textContent = data.topic ? data.topic : '(no topic: /topic text sets one)';
     $('title').textContent = 'agentirc - [' + channel + ']' + (data.topic ? ' ' + data.topic : '');
-    const chans = new Set(data.channels); chans.add(channel);
-    $('switchbar').replaceChildren(...[...chans].sort().map(c => {
-      const b = document.createElement('button');
-      b.textContent = c; b.setAttribute('role', 'tab');
-      b.setAttribute('aria-pressed', c === channel ? 'true' : 'false');
-      b.onclick = () => switchTo(c);
-      return b;
-    }));
+    drawTabs();
     $('nicks').replaceChildren(...(data.nicks || []).map(n => {
       const d = document.createElement('div');
+      if (n.prefix) d.append(span('pfx', n.prefix));
       const s = span(n.idle ? 'idle' : '', n.nick, n.idle ? '' : nickColor(n.nick));
-      if (n.idle) d.title = 'idle for more than 15 minutes';
-      d.append(s); return d; }));
+      d.title = [n.prefix === '~' ? 'channel founder' : n.prefix === '@' ? 'channel operator' : n.prefix === '%' ? 'channel moderator' : '',
+                 n.role ? 'server ' + n.role : '', n.idle ? 'idle for more than 15 minutes' : ''].filter(Boolean).join(', ');
+      d.append(s);
+      if (n.role) d.append(' ', span('role', '[' + n.role + ']'));
+      return d; }));
     const log = $('log');
     const atBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 40;
     data.lines.forEach(addLine);
@@ -116,7 +135,49 @@
     if (atBottom || data.lines.length > 50) log.scrollTop = log.scrollHeight;
   }
 
+  function drawTabs() {
+    if (channel) joined.add(channel);
+    remember();
+    const srv = document.createElement('button');
+    srv.textContent = 'Server'; srv.className = 'server'; srv.setAttribute('role', 'tab');
+    srv.setAttribute('aria-pressed', channel === '' ? 'true' : 'false');
+    srv.onclick = () => switchTo('');
+    $('switchbar').replaceChildren(srv, ...[...joined].sort().map(c => {
+      const b = document.createElement('button');
+      b.textContent = c; b.setAttribute('role', 'tab');
+      b.setAttribute('aria-pressed', c === channel ? 'true' : 'false');
+      b.onclick = () => switchTo(c);
+      return b;
+    }));
+  }
+
+  async function showServer(myGen) {
+    $('title').textContent = 'agentirc - [Server]';
+    $('topic').textContent = 'Server window: server info and commands. /list finds channels, /join #name enters one, /help lists everything.';
+    $('nicks').replaceChildren();
+    drawTabs();
+    try {
+      const r = await fetch(api('api/server'), { credentials: 'same-origin' });
+      if (r.status === 401) { location.reload(); return; }
+      const data = await r.json();
+      if (myGen !== gen) return;
+      $('me').textContent = 'You are ' + data.me;
+      for (const line of data.text.trimEnd().split('\n')) addLocal(line);
+      $('status').textContent = 'Connected to ' + location.host + ' (Server)';
+    } catch (e) { $('status').textContent = 'Could not load server info (' + e.message + ')'; }
+  }
+
+  async function command(text) {
+    const r = await fetch(api('api/command'), { method: 'POST', credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json', 'X-AgentIRC': '1' }, body: JSON.stringify({ channel: channel || '#general', text }) });
+    const out = await r.json().catch(() => ({ ok: false, text: 'HTTP ' + r.status }));
+    if (out.join) { switchTo(out.join); setTimeout(() => addLocal(out.text), 300); return true; }
+    if (channel === '' || !out.ok || !/^\[\d\d:\d\d\]/.test(out.text)) addLocal(out.text, out.ok ? 'srv' : 'err');
+    return true;
+  }
+
   async function poll(myGen) {
+    if (channel === '') { await showServer(myGen); return; }
     while (myGen === gen) {
       try {
         const q = new URLSearchParams({ channel, after: String(after) });
@@ -138,12 +199,21 @@
     channel = c.toLowerCase(); location.hash = channel; after = 0; gen++;
     $('log').replaceChildren(); poll(gen);
   }
+  // Leave a channel's tab: /part, or closing it from the list.
+  function part() { if (!channel) return; joined.delete(channel); remember(); switchTo(''); }
 
   $('input').addEventListener('keydown', async e => {
     if (e.key !== 'Enter') return;
     const text = e.target.value.trim();
     if (!text) return;
-    if (text.startsWith('/join ')) { e.target.value = ''; switchTo(text.slice(6).trim().replace(/^(?!#)/, '#')); return; }
+    const word = text.split(' ')[0].toLowerCase();
+    if (word === '/part' || word === '/close') { e.target.value = ''; part(); return; }
+    // Everything else with a slash runs as the same tool an agent uses,
+    // except /me, /topic, /approve and /deny, which the say endpoint keeps.
+    if (text.startsWith('/') && !['/me', '/topic', '/approve', '/deny'].includes(word)) {
+      e.target.value = ''; await command(text); return;
+    }
+    if (channel === '') { addLocal('This is the Server window. /join #general to talk, /list to find channels.', 'err'); return; }
     const r = await fetch(api('api/say'), { method: 'POST', credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json', 'X-AgentIRC': '1' }, body: JSON.stringify({ channel, text }) });
     if (r.ok) e.target.value = '';

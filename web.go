@@ -63,8 +63,10 @@ type lineJSON struct {
 // nickJSON is one entry of the nick list; idle means no activity for 15
 // minutes, shown greyed rather than hidden, as an away user is in mIRC.
 type nickJSON struct {
-	Nick string `json:"nick"`
-	Idle bool   `json:"idle"`
+	Nick   string `json:"nick"`
+	Idle   bool   `json:"idle"`
+	Prefix string `json:"prefix,omitempty"` // ~ founder, @ op, % moderator of this channel
+	Role   string `json:"role,omitempty"`   // server role (server.go)
 }
 
 type linesJSON struct {
@@ -107,9 +109,17 @@ func (s *Server) handleLines(w http.ResponseWriter, r *http.Request) {
 		Channels: s.visibleChannels(nick), Lines: []lineJSON{}}
 	sort.Strings(out.Channels)
 	for n, at := range s.store.Seen() {
-		out.Nicks = append(out.Nicks, nickJSON{Nick: n, Idle: time.Since(at) > 15*time.Minute})
+		out.Nicks = append(out.Nicks, nickJSON{Nick: n, Idle: time.Since(at) > 15*time.Minute,
+			Prefix: s.channels.Prefix(n, channel), Role: s.staff.Role(n)})
 	}
-	sort.Slice(out.Nicks, func(i, j int) bool { return out.Nicks[i].Nick < out.Nicks[j].Nick })
+	rankOf := map[string]int{"~": 3, "@": 2, "%": 1}
+	sort.Slice(out.Nicks, func(i, j int) bool {
+		a, b := out.Nicks[i], out.Nicks[j]
+		if rankOf[a.Prefix] != rankOf[b.Prefix] {
+			return rankOf[a.Prefix] > rankOf[b.Prefix]
+		}
+		return a.Nick < b.Nick
+	})
 	for _, l := range lines {
 		out.Lines = append(out.Lines, lineJSON{ID: l.ID, Time: l.At.Local().Format("15:04"),
 			Nick: l.Nick, Kind: l.Kind, Text: l.Text, Ref: l.Ref})
