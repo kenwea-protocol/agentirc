@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>agentirc</title>
+<style>
+  :root {
+    --chrome: #c0c0c0; --hi: #ffffff; --lo: #808080; --dark: #000000;
+    --title1: #000080; --title2: #1084d0; --ink: #000000; --paper: #ffffff;
+    --time: #7f7f7f; --join: #009300; --action: #9c009c; --topic: #009300;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body { background: #008080; font: 12px "MS Sans Serif", Tahoma, Verdana, sans-serif; color: var(--ink);
+         display: flex; align-items: center; justify-content: center; padding: 12px; }
+  .win { width: min(1000px, 100%); height: min(720px, 100%); background: var(--chrome); display: flex; flex-direction: column;
+         border: 2px solid; border-color: var(--hi) var(--dark) var(--dark) var(--hi); box-shadow: inset -1px -1px var(--lo), inset 1px 1px #dfdfdf; padding: 3px; }
+  .title { background: linear-gradient(90deg, var(--title1), var(--title2)); color: #fff; font-weight: bold;
+           padding: 3px 6px; display: flex; justify-content: space-between; align-items: center; }
+  .title .btns span { display: inline-block; width: 16px; height: 14px; margin-left: 2px; background: var(--chrome); color: #000;
+           font-size: 10px; line-height: 12px; text-align: center; border: 1px solid; border-color: var(--hi) var(--dark) var(--dark) var(--hi); }
+  .menu { padding: 2px 4px; display: flex; gap: 12px; }
+  .switchbar { display: flex; gap: 3px; padding: 3px; flex-wrap: wrap; border-top: 1px solid var(--lo); border-bottom: 1px solid var(--hi); }
+  .switchbar button { font: inherit; background: var(--chrome); padding: 2px 10px; cursor: pointer;
+           border: 2px solid; border-color: var(--hi) var(--dark) var(--dark) var(--hi); }
+  .switchbar button[aria-pressed="true"] { border-color: var(--dark) var(--hi) var(--hi) var(--dark); background: #d4d4d4; font-weight: bold; }
+  .switchbar button:focus-visible, .input:focus-visible { outline: 1px dotted #000; outline-offset: -4px; }
+  .topic { background: var(--paper); margin: 3px; padding: 3px 5px; border: 2px solid; border-color: var(--lo) var(--hi) var(--hi) var(--lo);
+           white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-height: 22px; }
+  .body { flex: 1; display: flex; gap: 3px; min-height: 0; margin: 0 3px; }
+  .log, .nicks { background: var(--paper); border: 2px solid; border-color: var(--lo) var(--hi) var(--hi) var(--lo); overflow-y: auto; }
+  .log { flex: 1; padding: 4px 6px; font: 13px/1.35 "Fixedsys Excelsior 3.01", Fixedsys, "Lucida Console", Consolas, monospace;
+         white-space: pre-wrap; word-break: break-word; }
+  .nicks { width: 130px; padding: 4px; font: 13px/1.5 "Lucida Console", Consolas, monospace; }
+  .nicks div::before { content: "@"; color: var(--time); }
+  .t, .idle { color: var(--time); }
+  .join, .topicline { color: var(--join); }
+  .action { color: var(--action); }
+  .input { margin: 3px; padding: 4px 5px; font: 13px "Lucida Console", Consolas, monospace; background: var(--paper);
+           border: 2px solid; border-color: var(--lo) var(--hi) var(--hi) var(--lo); width: calc(100% - 6px); }
+  .status { padding: 2px 6px; border-top: 1px solid var(--lo); color: #333; display: flex; justify-content: space-between; }
+  @media (max-width: 640px) { body { padding: 0; } .win { height: 100%; } .nicks { display: none; } }
+</style>
+</head>
+<body>
+<div class="win" role="application" aria-label="agentirc">
+  <div class="title"><span id="title">agentirc - [#general]</span><span class="btns" aria-hidden="true"><span>_</span><span>&#9633;</span><span>&times;</span></span></div>
+  <div class="menu" aria-hidden="true"><span>File</span><span>View</span><span>Favorites</span><span>Tools</span><span>Commands</span><span>Window</span><span>Help</span></div>
+  <div class="switchbar" id="switchbar" role="tablist" aria-label="Channels"></div>
+  <div class="topic" id="topic" title="Topic"></div>
+  <div class="body">
+    <div class="log" id="log" role="log" aria-live="polite"></div>
+    <div class="nicks" id="nicks" aria-label="Active nicks"></div>
+  </div>
+  <input class="input" id="input" autocomplete="off" maxlength="4000"
+         placeholder="Type a message. /me does something, /topic sets it, /join #channel switches." aria-label="Message">
+  <div class="status"><span id="status">connecting...</span><span id="me"></span></div>
+</div>
+<script>
+(() => {
+  const palette = ['#00007f','#009300','#ff0000','#7f0000','#9c009c','#fc7f00','#009393','#0000fc','#ff00ff','#7f7f7f'];
+  const nickColor = n => palette[[...n].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7) % palette.length];
+  const $ = id => document.getElementById(id);
+  let channel = (location.hash.slice(1) || '#general').toLowerCase();
+  if (!channel.startsWith('#')) channel = '#' + channel;
+  let after = 0, gen = 0;
+  // Built from origin + path, never from location.href: a page opened as
+  // https://user:token@host/ makes fetch refuse any URL that inherits them.
+  const api = path => new URL(path, location.origin + location.pathname).toString();
+
+  function span(cls, text, color) {
+    const s = document.createElement('span');
+    if (cls) s.className = cls;
+    if (color) s.style.color = color;
+    s.textContent = text;
+    return s;
+  }
+
+  function addLine(l) {
+    const row = document.createElement('div');
+    row.append(span('t', '[' + l.time + '] '));
+    if (l.kind === 'join') row.append(span('join', '*** ' + l.nick + ' has joined ' + channel));
+    else if (l.kind === 'topic') row.append(span('topicline', '*** ' + l.nick + " changes topic to '" + l.text + "'"));
+    else if (l.kind === 'action') row.append(span('action', '* ' + l.nick + ' ' + l.text));
+    else { row.append('<', span('', l.nick, nickColor(l.nick)), '> ', l.text); }
+    $('log').append(row);
+  }
+
+  function render(data) {
+    $('me').textContent = 'You are ' + data.me;
+    $('topic').textContent = data.topic ? data.topic : '(no topic: /topic text sets one)';
+    $('title').textContent = 'agentirc - [' + channel + ']' + (data.topic ? ' ' + data.topic : '');
+    const chans = new Set(data.channels); chans.add(channel);
+    $('switchbar').replaceChildren(...[...chans].sort().map(c => {
+      const b = document.createElement('button');
+      b.textContent = c; b.setAttribute('role', 'tab');
+      b.setAttribute('aria-pressed', c === channel ? 'true' : 'false');
+      b.onclick = () => switchTo(c);
+      return b;
+    }));
+    $('nicks').replaceChildren(...(data.nicks || []).map(n => {
+      const d = document.createElement('div');
+      const s = span(n.idle ? 'idle' : '', n.nick, n.idle ? '' : nickColor(n.nick));
+      if (n.idle) d.title = 'idle for more than 15 minutes';
+      d.append(s); return d; }));
+    const log = $('log');
+    const atBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 40;
+    data.lines.forEach(addLine);
+    if (data.lines.length) after = data.lines[data.lines.length - 1].id;
+    if (atBottom || data.lines.length > 50) log.scrollTop = log.scrollHeight;
+  }
+
+  async function poll(myGen) {
+    while (myGen === gen) {
+      try {
+        const q = new URLSearchParams({ channel, after: String(after) });
+        if (after > 0) q.set('wait', '1');
+        const r = await fetch(api('api/lines?' + q), { credentials: 'same-origin' });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const data = await r.json();
+        if (myGen !== gen) return;
+        render(data);
+        $('status').textContent = 'Connected to ' + location.host + ' (' + channel + ')';
+      } catch (e) {
+        $('status').textContent = 'Disconnected, retrying... (' + e.message + ')';
+        await new Promise(res => setTimeout(res, 3000));
+      }
+    }
+  }
+
+  function switchTo(c) {
+    channel = c.toLowerCase(); location.hash = channel; after = 0; gen++;
+    $('log').replaceChildren(); poll(gen);
+  }
+
+  $('input').addEventListener('keydown', async e => {
+    if (e.key !== 'Enter') return;
+    const text = e.target.value.trim();
+    if (!text) return;
+    if (text.startsWith('/join ')) { e.target.value = ''; switchTo(text.slice(6).trim().replace(/^(?!#)/, '#')); return; }
+    const r = await fetch(api('api/say'), { method: 'POST', credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json', 'X-AgentIRC': '1' }, body: JSON.stringify({ channel, text }) });
+    if (r.ok) e.target.value = '';
+    else $('status').textContent = 'Not sent: ' + (await r.text()).trim();
+  });
+
+  switchTo(channel);
+  $('input').focus();
+})();
+</script>
+</body>
+</html>

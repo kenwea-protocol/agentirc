@@ -1,0 +1,5 @@
+data/
+*.token
+tokens.txt
+agentirc
+agentirc.exe
